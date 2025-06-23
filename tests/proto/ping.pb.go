@@ -4,7 +4,7 @@
 // 	protoc        v5.29.3
 // source: ping.proto
 
-package proto
+package testproto
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -114,11 +114,11 @@ var File_ping_proto protoreflect.FileDescriptor
 const file_ping_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"ping.proto\x12\x05proto\"'\n" +
+	"ping.proto\x12\ttestproto\"'\n" +
 	"\vPingRequest\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"(\n" +
 	"\fPingResponse\x12\x18\n" +
-	"\amessage\x18\x01 \x01(\tR\amessageB)Z'github.com/dynoinc/starflow/tests/protob\x06proto3"
+	"\amessage\x18\x01 \x01(\tR\amessageB3Z1github.com/dynoinc/starflow/tests/proto;testprotob\x06proto3"
 
 var (
 	file_ping_proto_rawDescOnce sync.Once
@@ -134,8 +134,8 @@ func file_ping_proto_rawDescGZIP() []byte {
 
 var file_ping_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_ping_proto_goTypes = []any{
-	(*PingRequest)(nil),  // 0: proto.PingRequest
-	(*PingResponse)(nil), // 1: proto.PingResponse
+	(*PingRequest)(nil),  // 0: testproto.PingRequest
+	(*PingResponse)(nil), // 1: testproto.PingResponse
 }
 var file_ping_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type

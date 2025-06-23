@@ -7,40 +7,40 @@ import (
 	"testing"
 
 	"github.com/dynoinc/starflow"
-	pb "github.com/dynoinc/starflow/tests/proto"
+	testpb "github.com/dynoinc/starflow/tests/proto"
 
 	// Import proto packages to register types
 	_ "github.com/dynoinc/starflow/tests/proto"
 )
 
 // Global functions for proper reflection usage
-func pingFn(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
-	return &pb.PingResponse{Message: "pong: " + req.Message}, nil
+func pingFn(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+	return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
 }
 
-func paymentFn(ctx context.Context, req *pb.ProcessPaymentRequest) (*pb.ProcessPaymentResponse, error) {
-	return &pb.ProcessPaymentResponse{Success: true, TransactionId: "txn_123"}, nil
+func paymentFn(ctx context.Context, req *testpb.ProcessPaymentRequest) (*testpb.ProcessPaymentResponse, error) {
+	return &testpb.ProcessPaymentResponse{Success: true, TransactionId: "txn_123"}, nil
 }
 
 // Global flag to control bakingFnFails behavior for testing
 var bakingFnShouldFail = true
 
-func bakingFnFails(ctx context.Context, req *pb.BakePizzaRequest) (*pb.BakePizzaResponse, error) {
+func bakingFnFails(ctx context.Context, req *testpb.BakePizzaRequest) (*testpb.BakePizzaResponse, error) {
 	if bakingFnShouldFail {
 		return nil, fmt.Errorf("oven is on fire")
 	}
-	return &pb.BakePizzaResponse{Success: true}, nil
+	return &testpb.BakePizzaResponse{Success: true}, nil
 }
 
-func httpCallFn(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
+func httpCallFn(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 	// In a real implementation, you would make an actual HTTP call
 	// For this example, we'll just simulate it
-	return &pb.PingResponse{Message: "HTTP response simulated"}, nil
+	return &testpb.PingResponse{Message: "HTTP response simulated"}, nil
 }
 
-func dbQueryFn(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
+func dbQueryFn(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 	// Simulate database query
-	return &pb.PingResponse{Message: "DB result for: " + req.Message}, nil
+	return &testpb.PingResponse{Message: "DB result for: " + req.Message}, nil
 }
 
 func TestWorkflow(t *testing.T) {
@@ -56,19 +56,19 @@ func TestWorkflow(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	wf := starflow.New[*pb.PingRequest, *pb.PingResponse](store)
+	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 	starflow.Register(wf, pingFn)
 
 	script := `
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("tests/proto/ping.proto")
+	ping_proto = proto.file("ping.proto")
 	output = pingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 	return output
 `
 
-	runID, err := wf.Run([]byte(script), &pb.PingRequest{Message: "hello"})
+	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "hello"})
 	if err != nil {
 		t.Fatalf("workflow run failed: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestWorkflow_Resume(t *testing.T) {
 
 	// --- First run: Fails during baking ---
 	bakingFnShouldFail = true // Make sure it fails the first time
-	wf1 := starflow.New[*pb.OrderPizzaRequest, *pb.OrderPizzaResponse](store)
+	wf1 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
 	starflow.Register(wf1, paymentFn)
 	starflow.Register(wf1, bakingFnFails)
 
@@ -139,7 +139,7 @@ load("proto", "proto")
 
 def main(ctx, input):
 	print("workflow input:", input)
-	pizza_proto = proto.file("tests/proto/pizza.proto")
+	pizza_proto = proto.file("pizza.proto")
 	payment_req = pizza_proto.ProcessPaymentRequest(credit_card_number=input.credit_card_number, amount=1500)
 	payment_res = paymentFn(ctx=ctx, req=payment_req)
 
@@ -154,7 +154,7 @@ def main(ctx, input):
 
 	return pizza_proto.OrderPizzaResponse(order_id="order_456", status="ORDER_COMPLETE")
 `
-	runID, err := wf1.Run([]byte(script), &pb.OrderPizzaRequest{
+	runID, err := wf1.Run([]byte(script), &testpb.OrderPizzaRequest{
 		PizzaType:        "pepperoni",
 		Quantity:         1,
 		CreditCardNumber: "1234-5678-8765-4321",
@@ -180,7 +180,7 @@ def main(ctx, input):
 
 	// --- Second run: Resumes and succeeds ---
 	bakingFnShouldFail = false // Make it succeed this time
-	wf2 := starflow.New[*pb.OrderPizzaRequest, *pb.OrderPizzaResponse](store)
+	wf2 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
 	starflow.Register(wf2, paymentFn)
 	starflow.Register(wf2, bakingFnFails) // Same function, but now it will succeed
 
@@ -226,7 +226,7 @@ func TestWorkflowLibraryUsage(t *testing.T) {
 	}
 
 	// Step 3: Create the workflow and register functions
-	wf := starflow.New[*pb.PingRequest, *pb.PingResponse](store)
+	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 	starflow.Register(wf, httpCallFn)
 	starflow.Register(wf, dbQueryFn)
 
@@ -238,7 +238,7 @@ def main(ctx, input):
 	print("Starting workflow with input:", input.message)
 	
 	# Load the proto file to access message types
-	ping_proto = proto.file("tests/proto/ping.proto")
+	ping_proto = proto.file("ping.proto")
 	
 	# Make an HTTP call
 	http_req = ping_proto.PingRequest(message="http_" + input.message)
@@ -255,7 +255,7 @@ def main(ctx, input):
 `
 
 	// Step 5: Run the workflow
-	runID, err := wf.Run([]byte(script), &pb.PingRequest{Message: "example"})
+	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "example"})
 	if err != nil {
 		t.Fatalf("workflow run failed: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestWorkflow_StarlarkMathImport(t *testing.T) {
 		t.Fatalf("failed to create store: %v", err)
 	}
 
-	wf := starflow.New[*pb.PingRequest, *pb.PingResponse](store)
+	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 	starflow.Register(wf, pingFn)
 
 	script := `
@@ -338,10 +338,10 @@ load("math", "sqrt")
 def main(ctx, input):
     # Use math.sqrt to compute the square root of 16
     result = sqrt(16)
-    return proto.file("tests/proto/ping.proto").PingResponse(message=str(result))
+    return proto.file("ping.proto").PingResponse(message=str(result))
 `
 
-	runID, err := wf.Run([]byte(script), &pb.PingRequest{Message: "test"})
+	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "test"})
 	if err != nil {
 		t.Fatalf("workflow run failed: %v", err)
 	}

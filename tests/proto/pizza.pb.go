@@ -4,7 +4,7 @@
 // 	protoc        v5.29.3
 // source: pizza.proto
 
-package proto
+package testproto
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -337,7 +337,7 @@ var File_pizza_proto protoreflect.FileDescriptor
 
 const file_pizza_proto_rawDesc = "" +
 	"\n" +
-	"\vpizza.proto\x12\x05proto\"|\n" +
+	"\vpizza.proto\x12\ttestproto\"|\n" +
 	"\x11OrderPizzaRequest\x12\x1d\n" +
 	"\n" +
 	"pizza_type\x18\x01 \x01(\tR\tpizzaType\x12\x1a\n" +
@@ -357,7 +357,7 @@ const file_pizza_proto_rawDesc = "" +
 	"pizza_type\x18\x01 \x01(\tR\tpizzaType\x12\x1a\n" +
 	"\bquantity\x18\x02 \x01(\x05R\bquantity\"-\n" +
 	"\x11BakePizzaResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccessB)Z'github.com/dynoinc/starflow/tests/protob\x06proto3"
+	"\asuccess\x18\x01 \x01(\bR\asuccessB3Z1github.com/dynoinc/starflow/tests/proto;testprotob\x06proto3"
 
 var (
 	file_pizza_proto_rawDescOnce sync.Once
@@ -373,12 +373,12 @@ func file_pizza_proto_rawDescGZIP() []byte {
 
 var file_pizza_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_pizza_proto_goTypes = []any{
-	(*OrderPizzaRequest)(nil),      // 0: proto.OrderPizzaRequest
-	(*OrderPizzaResponse)(nil),     // 1: proto.OrderPizzaResponse
-	(*ProcessPaymentRequest)(nil),  // 2: proto.ProcessPaymentRequest
-	(*ProcessPaymentResponse)(nil), // 3: proto.ProcessPaymentResponse
-	(*BakePizzaRequest)(nil),       // 4: proto.BakePizzaRequest
-	(*BakePizzaResponse)(nil),      // 5: proto.BakePizzaResponse
+	(*OrderPizzaRequest)(nil),      // 0: testproto.OrderPizzaRequest
+	(*OrderPizzaResponse)(nil),     // 1: testproto.OrderPizzaResponse
+	(*ProcessPaymentRequest)(nil),  // 2: testproto.ProcessPaymentRequest
+	(*ProcessPaymentResponse)(nil), // 3: testproto.ProcessPaymentResponse
+	(*BakePizzaRequest)(nil),       // 4: testproto.BakePizzaRequest
+	(*BakePizzaResponse)(nil),      // 5: testproto.BakePizzaResponse
 }
 var file_pizza_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
