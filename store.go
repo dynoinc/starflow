@@ -30,4 +30,10 @@ type Store interface {
 
 	// UpdateRunOutput updates the output of a run.
 	UpdateRunOutput(ctx context.Context, runID string, output []byte) error
+
+	// ListRuns returns all runs whose status matches any of the supplied states.
+	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
+
+	// GetEventByCorrelationID retrieves an event matching the given correlation ID for the run.
+	GetEventByCorrelationID(runID string, correlationID string) (*Event, error)
 }

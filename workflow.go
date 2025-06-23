@@ -2,6 +2,7 @@ package starflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/emcfarlane/starlarkproto"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.starlark.net/lib/json"
@@ -18,6 +20,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
+
+// ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
+var ErrYield = errors.New("workflow yielded")
 
 type registeredFn struct {
 	fn      func(ctx context.Context, req proto.Message) (proto.Message, error)
@@ -124,7 +129,7 @@ func (w *Workflow[Input, Output]) Run(script []byte, input Input) (string, error
 }
 
 // Resume executes or resumes a workflow run until completion, returning the output.
-func (w *Workflow[Input, Output]) Resume(ctx context.Context, runID string) (Output, error) {
+func (w *Workflow[Input, Output]) resumeRun(ctx context.Context, runID string) (Output, error) {
 	var zero Output
 
 	run, err := w.store.GetRun(runID)
@@ -228,6 +233,10 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// but the wrapped functions will short-circuit and return recorded values.
 	globalsAfterExec, err := starlark.ExecFile(thread, "script", script, globals)
 	if err != nil {
+		if errors.Is(err, ErrYield) {
+			// Yield is an expected pause, status already set to WAITING in wrapFn.
+			return zero, nil
+		}
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
@@ -393,6 +402,26 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 
 		resp, err := regFn.fn(ctx, req)
 
+		// Handle yield sentinel separately
+		if errors.Is(err, ErrYield) {
+			cid := uuid.New().String()[:8]
+			if recErr := w.store.RecordEvent(runID, &Event{
+				Timestamp:     time.Now(),
+				Type:          EventTypeYield,
+				FunctionName:  name,
+				CorrelationID: cid,
+				Input:         inputBytes,
+			}); recErr != nil {
+				return nil, fmt.Errorf("failed to record yield event: %w", recErr)
+			}
+			// Set status to waiting
+			if errStatus := w.store.UpdateRunStatus(ctx, runID, RunStatusWaiting); errStatus != nil {
+				return nil, errStatus
+			}
+			return nil, ErrYield
+		}
+
+		// Marshal response if present
 		var outputBytes []byte
 		if resp != nil {
 			outputBytes, _ = proto.Marshal(resp)
@@ -420,4 +449,34 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 
 		return starlarkproto.MakeMessage(resp), nil
 	})
+}
+
+// Signal delivers an external response to a previously yielded function call, identified by its correlation ID.
+func (w *Workflow[Input, Output]) Signal(ctx context.Context, runID string, correlationID string, resp proto.Message) error {
+	// Fetch the corresponding yield event to validate existence
+	yieldEvent, err := w.store.GetEventByCorrelationID(runID, correlationID)
+	if err != nil {
+		return err
+	}
+	if yieldEvent.Type != EventTypeYield {
+		return fmt.Errorf("correlation id %s is not a yield event", correlationID)
+	}
+
+	var outputBytes []byte
+	if resp != nil {
+		outputBytes, _ = proto.Marshal(resp)
+	}
+
+	if err := w.store.RecordEvent(runID, &Event{
+		Timestamp:     time.Now(),
+		Type:          EventTypeReturn,
+		FunctionName:  yieldEvent.FunctionName,
+		CorrelationID: correlationID,
+		Output:        outputBytes,
+	}); err != nil {
+		return err
+	}
+
+	// Mark the run as ready to continue
+	return w.store.UpdateRunStatus(ctx, runID, RunStatusPending)
 }

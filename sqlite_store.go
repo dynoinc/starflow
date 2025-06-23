@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -59,6 +60,7 @@ func (s *SQLiteStore) init() error {
 		timestamp DATETIME NOT NULL,
 		type TEXT NOT NULL,
 		function_name TEXT NOT NULL,
+		correlation_id TEXT,
 		input BLOB,
 		output BLOB,
 		error TEXT,
@@ -103,7 +105,7 @@ func (s *SQLiteStore) CreateRun(scriptHash string, input []byte) (string, error)
 
 	_, err := s.db.Exec(
 		"INSERT INTO runs (id, script_hash, input, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		runID, scriptHash, input, RunStatusRunning, now, now,
+		runID, scriptHash, input, RunStatusPending, now, now,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
@@ -137,8 +139,8 @@ func (s *SQLiteStore) GetRun(runID string) (*Run, error) {
 // RecordEvent records an event in the execution history of a run.
 func (s *SQLiteStore) RecordEvent(runID string, event *Event) error {
 	_, err := s.db.Exec(
-		"INSERT INTO events (run_id, timestamp, type, function_name, input, output, error) VALUES (?, ?, ?, ?, ?, ?, ?)",
-		runID, event.Timestamp, event.Type, event.FunctionName, event.Input, event.Output, event.Error,
+		"INSERT INTO events (run_id, timestamp, type, function_name, correlation_id, input, output, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		runID, event.Timestamp, event.Type, event.FunctionName, event.CorrelationID, event.Input, event.Output, event.Error,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record event: %w", err)
@@ -149,7 +151,7 @@ func (s *SQLiteStore) RecordEvent(runID string, event *Event) error {
 // GetEvents retrieves all events for a specific run.
 func (s *SQLiteStore) GetEvents(runID string) ([]*Event, error) {
 	rows, err := s.db.Query(
-		"SELECT timestamp, type, function_name, input, output, error FROM events WHERE run_id = ? ORDER BY timestamp ASC",
+		"SELECT timestamp, type, function_name, correlation_id, input, output, error FROM events WHERE run_id = ? ORDER BY timestamp ASC",
 		runID,
 	)
 	if err != nil {
@@ -162,7 +164,7 @@ func (s *SQLiteStore) GetEvents(runID string) ([]*Event, error) {
 		var event Event
 		var inputBytes, outputBytes []byte
 		var eventType string
-		err := rows.Scan(&event.Timestamp, &eventType, &event.FunctionName, &inputBytes, &outputBytes, &event.Error)
+		err := rows.Scan(&event.Timestamp, &eventType, &event.FunctionName, &event.CorrelationID, &inputBytes, &outputBytes, &event.Error)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan event: %w", err)
 		}
@@ -187,4 +189,57 @@ func (s *SQLiteStore) UpdateRunOutput(ctx context.Context, runID string, output 
 		return fmt.Errorf("failed to update run output: %w", err)
 	}
 	return nil
+}
+
+// ListRuns returns all runs whose status matches any of the supplied statuses.
+func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+
+	// Build placeholders
+	placeholders := make([]string, len(statuses))
+	args := make([]interface{}, len(statuses))
+	for i, st := range statuses {
+		placeholders[i] = "?"
+		args[i] = st
+	}
+
+	query := fmt.Sprintf(`SELECT id, script_hash, status, input, output, created_at, updated_at
+		FROM runs WHERE status IN (%s)`, strings.Join(placeholders, ","))
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query runs: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []*Run
+	for rows.Next() {
+		var run Run
+		var status string
+		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt); err != nil {
+			return nil, err
+		}
+		run.Status = RunStatus(status)
+		runs = append(runs, &run)
+	}
+
+	return runs, nil
+}
+
+// GetEventByCorrelationID retrieves an event by runID and correlationID.
+func (s *SQLiteStore) GetEventByCorrelationID(runID string, cid string) (*Event, error) {
+	var e Event
+	var eventType string
+	row := s.db.QueryRow(`SELECT timestamp, type, function_name, input, output, error FROM events WHERE run_id = ? AND correlation_id = ? LIMIT 1`, runID, cid)
+	if err := row.Scan(&e.Timestamp, &eventType, &e.FunctionName, &e.Input, &e.Output, &e.Error); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, fmt.Errorf("event with correlation_id %s not found", cid)
+		}
+		return nil, fmt.Errorf("failed to query event: %w", err)
+	}
+	e.Type = EventType(eventType)
+	e.CorrelationID = cid
+	return &e, nil
 }

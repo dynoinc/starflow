@@ -8,9 +8,7 @@ import (
 
 	"github.com/dynoinc/starflow"
 	testpb "github.com/dynoinc/starflow/tests/proto"
-
-	// Import proto packages to register types
-	_ "github.com/dynoinc/starflow/tests/proto"
+	"google.golang.org/protobuf/proto"
 )
 
 // Global functions for proper reflection usage
@@ -73,19 +71,15 @@ def main(ctx, input):
 		t.Fatalf("workflow run failed: %v", err)
 	}
 
-	output, err := wf.Resume(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("workflow resume failed: %v", err)
-	}
+	worker := wf.NewWorker(0)
+	worker.ProcessOnce(context.Background())
 
-	if output.Message != "pong: hello" {
-		t.Errorf("expected output message to be 'pong: hello', got %s", output.Message)
-	}
-
+	// Fetch run output
 	run, err := store.GetRun(runID)
 	if err != nil {
 		t.Fatalf("failed to get run: %v", err)
 	}
+	var outputMsg testpb.PingResponse
 
 	if run.Status != starflow.RunStatusCompleted {
 		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
@@ -112,6 +106,14 @@ def main(ctx, input):
 	}
 	if events[1].Error != "" {
 		t.Errorf("expected second event to have no error, got %s", events[1].Error)
+	}
+
+	if err := proto.Unmarshal(run.Output, &outputMsg); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+
+	if outputMsg.Message != "pong: hello" {
+		t.Errorf("expected output message to be 'pong: hello', got %s", outputMsg.Message)
 	}
 }
 
@@ -165,10 +167,8 @@ def main(ctx, input):
 	}
 
 	// Try to execute - this should fail
-	_, err = wf1.Resume(context.Background(), runID)
-	if err == nil {
-		t.Fatalf("expected workflow to fail on the first run, but it succeeded")
-	}
+	worker1 := wf1.NewWorker(0)
+	worker1.ProcessOnce(context.Background())
 
 	run, err := store.GetRun(runID)
 	if err != nil {
@@ -179,34 +179,43 @@ def main(ctx, input):
 	}
 
 	// --- Second run: Resumes and succeeds ---
-	bakingFnShouldFail = false // Make it succeed this time
+	bakingFnShouldFail = false
+
+	if err := store.UpdateRunStatus(context.Background(), runID, starflow.RunStatusPending); err != nil {
+		t.Fatalf("failed to reset status: %v", err)
+	}
+
 	wf2 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
 	starflow.Register(wf2, paymentFn)
-	starflow.Register(wf2, bakingFnFails) // Same function, but now it will succeed
+	starflow.Register(wf2, bakingFnFails)
 
-	output, err := wf2.Resume(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("workflow resume failed: %v", err)
-	}
-
-	if output.Status != "ORDER_COMPLETE" {
-		t.Errorf("expected output status to be ORDER_COMPLETE, got %s", output.Status)
-	}
+	worker2 := wf2.NewWorker(0)
+	worker2.ProcessOnce(context.Background())
 
 	run, err = store.GetRun(runID)
 	if err != nil {
-		t.Fatalf("failed to get run after resume: %v", err)
+		t.Fatalf("failed to get run after second processing: %v", err)
 	}
+
 	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected run status to be COMPLETED after resume, got %s", run.Status)
+		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
+	}
+
+	var outResp testpb.OrderPizzaResponse
+	if err := proto.Unmarshal(run.Output, &outResp); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
+
+	if outResp.Status != "ORDER_COMPLETE" {
+		t.Errorf("expected output status to be ORDER_COMPLETE, got %s", outResp.Status)
 	}
 
 	events, err := store.GetEvents(runID)
 	if err != nil {
-		t.Fatalf("failed to get events after resume: %v", err)
+		t.Fatalf("failed to get events after second processing: %v", err)
 	}
 	if len(events) != 6 {
-		t.Fatalf("expected 6 events after resume, got %d", len(events))
+		t.Fatalf("expected 6 events after second processing, got %d", len(events))
 	}
 }
 
@@ -261,22 +270,25 @@ def main(ctx, input):
 	}
 
 	// Step 6: Execute the workflow
-	output, err := wf.Resume(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("workflow resume failed: %v", err)
-	}
+	worker := wf.NewWorker(0)
+	worker.ProcessOnce(context.Background())
 
-	expectedMessage := "Completed: HTTP response simulated + DB result for: db_example"
-	if output.Message != expectedMessage {
-		t.Errorf("expected output message to be %s, got %s", expectedMessage, output.Message)
-	}
-
-	// Step 7: Verify the workflow completed successfully
+	// Fetch run output
 	run, err := store.GetRun(runID)
 	if err != nil {
 		t.Fatalf("failed to get run: %v", err)
 	}
+	var outputResp testpb.PingResponse
+	if err := proto.Unmarshal(run.Output, &outputResp); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
+	}
 
+	expectedMessage := "Completed: HTTP response simulated + DB result for: db_example"
+	if outputResp.Message != expectedMessage {
+		t.Errorf("expected output message to be %s, got %s", expectedMessage, outputResp.Message)
+	}
+
+	// Step 7: Verify the workflow completed successfully
 	if run.Status != starflow.RunStatusCompleted {
 		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
 	}
@@ -311,7 +323,7 @@ def main(ctx, input):
 
 	t.Log("✅ Workflow completed successfully!")
 	t.Logf("Run ID: %s", runID)
-	t.Logf("Output: %s", output.Message)
+	t.Logf("Output: %s", outputResp.Message)
 	t.Logf("Events recorded: %d", len(events))
 }
 
@@ -346,12 +358,20 @@ def main(ctx, input):
 		t.Fatalf("workflow run failed: %v", err)
 	}
 
-	output, err := wf.Resume(context.Background(), runID)
+	worker := wf.NewWorker(0)
+	worker.ProcessOnce(context.Background())
+
+	// Fetch run output
+	run, err := store.GetRun(runID)
 	if err != nil {
-		t.Fatalf("workflow resume failed: %v", err)
+		t.Fatalf("failed to get run: %v", err)
+	}
+	var outputResp testpb.PingResponse
+	if err := proto.Unmarshal(run.Output, &outputResp); err != nil {
+		t.Fatalf("failed to unmarshal output: %v", err)
 	}
 
-	if output.Message != "4" && output.Message != "4.0" {
-		t.Errorf("expected output message to be '4' or '4.0', got %s", output.Message)
+	if outputResp.Message != "4" && outputResp.Message != "4.0" {
+		t.Errorf("expected output message to be '4' or '4.0', got %s", outputResp.Message)
 	}
 }
