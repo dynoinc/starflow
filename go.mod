@@ -4,7 +4,7 @@ go 1.24.4
 
 require (
 	github.com/emcfarlane/starlarkproto v0.0.0-20240320211046-843c31c8d5ed
-	github.com/google/uuid v1.6.0
+	github.com/lithammer/shortuuid/v4 v4.2.0
 	go.opentelemetry.io/otel v1.36.0
 	go.opentelemetry.io/otel/trace v1.36.0
 	go.starlark.net v0.0.0-20250603171236-27fdb1d4744d
@@ -17,6 +17,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

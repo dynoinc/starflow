@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/emcfarlane/starlarkproto"
-	"github.com/google/uuid"
+	"github.com/lithammer/shortuuid/v4"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.starlark.net/lib/json"
@@ -404,7 +404,7 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 
 		// Handle yield sentinel separately
 		if errors.Is(err, ErrYield) {
-			cid := uuid.New().String()[:8]
+			cid := shortuuid.New()[:8]
 			if recErr := w.store.RecordEvent(runID, &Event{
 				Timestamp:     time.Now(),
 				Type:          EventTypeYield,

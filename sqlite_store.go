@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/lithammer/shortuuid/v4"
 	_ "modernc.org/sqlite"
 )
 
@@ -100,7 +100,7 @@ func (s *SQLiteStore) GetScript(scriptHash string) ([]byte, error) {
 
 // CreateRun creates a new run record for a given script.
 func (s *SQLiteStore) CreateRun(scriptHash string, input []byte) (string, error) {
-	runID := uuid.New().String()
+	runID := shortuuid.New()
 	now := time.Now()
 
 	_, err := s.db.Exec(
