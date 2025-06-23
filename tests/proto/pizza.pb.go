@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.6
 // 	protoc        v5.29.3
-// source: proto/pizza.proto
+// source: pizza.proto
 
 package proto
 
@@ -32,7 +32,7 @@ type OrderPizzaRequest struct {
 
 func (x *OrderPizzaRequest) Reset() {
 	*x = OrderPizzaRequest{}
-	mi := &file_proto_pizza_proto_msgTypes[0]
+	mi := &file_pizza_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -44,7 +44,7 @@ func (x *OrderPizzaRequest) String() string {
 func (*OrderPizzaRequest) ProtoMessage() {}
 
 func (x *OrderPizzaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[0]
+	mi := &file_pizza_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -57,7 +57,7 @@ func (x *OrderPizzaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OrderPizzaRequest.ProtoReflect.Descriptor instead.
 func (*OrderPizzaRequest) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{0}
+	return file_pizza_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *OrderPizzaRequest) GetPizzaType() string {
@@ -91,7 +91,7 @@ type OrderPizzaResponse struct {
 
 func (x *OrderPizzaResponse) Reset() {
 	*x = OrderPizzaResponse{}
-	mi := &file_proto_pizza_proto_msgTypes[1]
+	mi := &file_pizza_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -103,7 +103,7 @@ func (x *OrderPizzaResponse) String() string {
 func (*OrderPizzaResponse) ProtoMessage() {}
 
 func (x *OrderPizzaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[1]
+	mi := &file_pizza_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -116,7 +116,7 @@ func (x *OrderPizzaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OrderPizzaResponse.ProtoReflect.Descriptor instead.
 func (*OrderPizzaResponse) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{1}
+	return file_pizza_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *OrderPizzaResponse) GetOrderId() string {
@@ -143,7 +143,7 @@ type ProcessPaymentRequest struct {
 
 func (x *ProcessPaymentRequest) Reset() {
 	*x = ProcessPaymentRequest{}
-	mi := &file_proto_pizza_proto_msgTypes[2]
+	mi := &file_pizza_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +155,7 @@ func (x *ProcessPaymentRequest) String() string {
 func (*ProcessPaymentRequest) ProtoMessage() {}
 
 func (x *ProcessPaymentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[2]
+	mi := &file_pizza_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +168,7 @@ func (x *ProcessPaymentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessPaymentRequest.ProtoReflect.Descriptor instead.
 func (*ProcessPaymentRequest) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{2}
+	return file_pizza_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ProcessPaymentRequest) GetCreditCardNumber() string {
@@ -195,7 +195,7 @@ type ProcessPaymentResponse struct {
 
 func (x *ProcessPaymentResponse) Reset() {
 	*x = ProcessPaymentResponse{}
-	mi := &file_proto_pizza_proto_msgTypes[3]
+	mi := &file_pizza_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -207,7 +207,7 @@ func (x *ProcessPaymentResponse) String() string {
 func (*ProcessPaymentResponse) ProtoMessage() {}
 
 func (x *ProcessPaymentResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[3]
+	mi := &file_pizza_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -220,7 +220,7 @@ func (x *ProcessPaymentResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessPaymentResponse.ProtoReflect.Descriptor instead.
 func (*ProcessPaymentResponse) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{3}
+	return file_pizza_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ProcessPaymentResponse) GetSuccess() bool {
@@ -247,7 +247,7 @@ type BakePizzaRequest struct {
 
 func (x *BakePizzaRequest) Reset() {
 	*x = BakePizzaRequest{}
-	mi := &file_proto_pizza_proto_msgTypes[4]
+	mi := &file_pizza_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +259,7 @@ func (x *BakePizzaRequest) String() string {
 func (*BakePizzaRequest) ProtoMessage() {}
 
 func (x *BakePizzaRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[4]
+	mi := &file_pizza_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,7 +272,7 @@ func (x *BakePizzaRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BakePizzaRequest.ProtoReflect.Descriptor instead.
 func (*BakePizzaRequest) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{4}
+	return file_pizza_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *BakePizzaRequest) GetPizzaType() string {
@@ -298,7 +298,7 @@ type BakePizzaResponse struct {
 
 func (x *BakePizzaResponse) Reset() {
 	*x = BakePizzaResponse{}
-	mi := &file_proto_pizza_proto_msgTypes[5]
+	mi := &file_pizza_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -310,7 +310,7 @@ func (x *BakePizzaResponse) String() string {
 func (*BakePizzaResponse) ProtoMessage() {}
 
 func (x *BakePizzaResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_pizza_proto_msgTypes[5]
+	mi := &file_pizza_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -323,7 +323,7 @@ func (x *BakePizzaResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BakePizzaResponse.ProtoReflect.Descriptor instead.
 func (*BakePizzaResponse) Descriptor() ([]byte, []int) {
-	return file_proto_pizza_proto_rawDescGZIP(), []int{5}
+	return file_pizza_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *BakePizzaResponse) GetSuccess() bool {
@@ -333,11 +333,11 @@ func (x *BakePizzaResponse) GetSuccess() bool {
 	return false
 }
 
-var File_proto_pizza_proto protoreflect.FileDescriptor
+var File_pizza_proto protoreflect.FileDescriptor
 
-const file_proto_pizza_proto_rawDesc = "" +
+const file_pizza_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/pizza.proto\x12\x05proto\"|\n" +
+	"\vpizza.proto\x12\x05proto\"|\n" +
 	"\x11OrderPizzaRequest\x12\x1d\n" +
 	"\n" +
 	"pizza_type\x18\x01 \x01(\tR\tpizzaType\x12\x1a\n" +
@@ -357,22 +357,22 @@ const file_proto_pizza_proto_rawDesc = "" +
 	"pizza_type\x18\x01 \x01(\tR\tpizzaType\x12\x1a\n" +
 	"\bquantity\x18\x02 \x01(\x05R\bquantity\"-\n" +
 	"\x11BakePizzaResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccessB#Z!github.com/dynoinc/starflow/protob\x06proto3"
+	"\asuccess\x18\x01 \x01(\bR\asuccessB)Z'github.com/dynoinc/starflow/tests/protob\x06proto3"
 
 var (
-	file_proto_pizza_proto_rawDescOnce sync.Once
-	file_proto_pizza_proto_rawDescData []byte
+	file_pizza_proto_rawDescOnce sync.Once
+	file_pizza_proto_rawDescData []byte
 )
 
-func file_proto_pizza_proto_rawDescGZIP() []byte {
-	file_proto_pizza_proto_rawDescOnce.Do(func() {
-		file_proto_pizza_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_pizza_proto_rawDesc), len(file_proto_pizza_proto_rawDesc)))
+func file_pizza_proto_rawDescGZIP() []byte {
+	file_pizza_proto_rawDescOnce.Do(func() {
+		file_pizza_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_pizza_proto_rawDesc), len(file_pizza_proto_rawDesc)))
 	})
-	return file_proto_pizza_proto_rawDescData
+	return file_pizza_proto_rawDescData
 }
 
-var file_proto_pizza_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_proto_pizza_proto_goTypes = []any{
+var file_pizza_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_pizza_proto_goTypes = []any{
 	(*OrderPizzaRequest)(nil),      // 0: proto.OrderPizzaRequest
 	(*OrderPizzaResponse)(nil),     // 1: proto.OrderPizzaResponse
 	(*ProcessPaymentRequest)(nil),  // 2: proto.ProcessPaymentRequest
@@ -380,7 +380,7 @@ var file_proto_pizza_proto_goTypes = []any{
 	(*BakePizzaRequest)(nil),       // 4: proto.BakePizzaRequest
 	(*BakePizzaResponse)(nil),      // 5: proto.BakePizzaResponse
 }
-var file_proto_pizza_proto_depIdxs = []int32{
+var file_pizza_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -388,26 +388,26 @@ var file_proto_pizza_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_proto_pizza_proto_init() }
-func file_proto_pizza_proto_init() {
-	if File_proto_pizza_proto != nil {
+func init() { file_pizza_proto_init() }
+func file_pizza_proto_init() {
+	if File_pizza_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_pizza_proto_rawDesc), len(file_proto_pizza_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pizza_proto_rawDesc), len(file_pizza_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_proto_pizza_proto_goTypes,
-		DependencyIndexes: file_proto_pizza_proto_depIdxs,
-		MessageInfos:      file_proto_pizza_proto_msgTypes,
+		GoTypes:           file_pizza_proto_goTypes,
+		DependencyIndexes: file_pizza_proto_depIdxs,
+		MessageInfos:      file_pizza_proto_msgTypes,
 	}.Build()
-	File_proto_pizza_proto = out.File
-	file_proto_pizza_proto_goTypes = nil
-	file_proto_pizza_proto_depIdxs = nil
+	File_pizza_proto = out.File
+	file_pizza_proto_goTypes = nil
+	file_pizza_proto_depIdxs = nil
 }
