@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/emcfarlane/starlarkproto"
 	"github.com/lithammer/shortuuid/v4"
 	"go.opentelemetry.io/otel"
@@ -25,9 +26,29 @@ import (
 var ErrYield = errors.New("workflow yielded")
 
 type registeredFn struct {
-	fn      func(ctx context.Context, req proto.Message) (proto.Message, error)
-	reqType proto.Message
-	resType proto.Message
+	fn          func(ctx context.Context, req proto.Message) (proto.Message, error)
+	reqType     proto.Message
+	resType     proto.Message
+	name        string
+	retryPolicy backoff.BackOff
+}
+
+// Option configures behaviour of a registered function.
+type Option func(*registeredFn)
+
+// WithName overrides the automatically derived name for the function.
+func WithName(name string) Option {
+	return func(rf *registeredFn) {
+		rf.name = name
+	}
+}
+
+// WithRetryPolicy specifies a retry policy for the function.
+// Provide an implementation from the backoff/v4 package, e.g. backoff.NewExponentialBackOff().
+func WithRetryPolicy(b backoff.BackOff) Option {
+	return func(rf *registeredFn) {
+		rf.retryPolicy = b
+	}
 }
 
 // Workflow executes and manages durable Starlark workflows.
@@ -51,14 +72,14 @@ func New[Input proto.Message, Output proto.Message](store Store) *Workflow[Input
 // Register registers a Go function to be callable from Starlark using generics and reflection.
 // The function must have the signature: func(ctx context.Context, req ReqType) (ResType, error)
 // where ReqType and ResType implement proto.Message.
-func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](w *Workflow[Input, Output], fn func(ctx context.Context, req Req) (Res, error)) {
+func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](w *Workflow[Input, Output], fn func(ctx context.Context, req Req) (Res, error), opts ...Option) {
 	// Use reflection to get function name
 	funcValue := reflect.ValueOf(fn)
 	funcName := runtime.FuncForPC(funcValue.Pointer()).Name()
 
 	// Extract just the function name (remove package path)
 	parts := strings.Split(funcName, ".")
-	name := parts[len(parts)-1]
+	defaultName := parts[len(parts)-1]
 
 	// Create instances to get the types (not zero values)
 	var req Req
@@ -82,9 +103,27 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 		return fn(ctx, typedReq)
 	}
 
-	w.registry[name] = registeredFn{fn: wrappedFn, reqType: reqInstance, resType: resInstance}
-	w.types[name] = reqInstance
-	w.types[name+"_response"] = resInstance
+	reg := registeredFn{
+		fn:      wrappedFn,
+		reqType: reqInstance,
+		resType: resInstance,
+		name:    defaultName,
+	}
+
+	// Apply functional options
+	for _, o := range opts {
+		o(&reg)
+	}
+
+	finalName := reg.name
+	if finalName == "" {
+		finalName = defaultName
+		reg.name = finalName
+	}
+
+	w.registry[finalName] = reg
+	w.types[finalName] = reqInstance
+	w.types[finalName+"_response"] = resInstance
 }
 
 // createInputInstance creates a new instance of the Input type using reflection
@@ -400,7 +439,26 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			return nil, fmt.Errorf("failed to record call event: %w", err)
 		}
 
-		resp, err := regFn.fn(ctx, req)
+		var resp proto.Message
+
+		callFunc := func() error {
+			var innerErr error
+			resp, innerErr = regFn.fn(ctx, req)
+
+			// Do not retry on ErrYield
+			if errors.Is(innerErr, ErrYield) {
+				return backoff.Permanent(innerErr)
+			}
+			return innerErr
+		}
+
+		if regFn.retryPolicy != nil {
+			policy := backoff.WithContext(regFn.retryPolicy, ctx)
+			policy.Reset()
+			err = backoff.Retry(callFunc, policy)
+		} else {
+			err = callFunc()
+		}
 
 		// Handle yield sentinel separately
 		if errors.Is(err, ErrYield) {
