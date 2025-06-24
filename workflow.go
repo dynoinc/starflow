@@ -2,7 +2,6 @@ package starflow
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/emcfarlane/starlarkproto"
-	"github.com/lithammer/shortuuid/v4"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.starlark.net/lib/json"
@@ -23,24 +21,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
-
-// yieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
-type yieldError struct {
-	cid string
-}
-
-func (y yieldError) Error() string { return "workflow yielded" }
-
-// Yield creates a new correlation id and returns an error sentinel that callers can return
-// from their registered function to pause the workflow.
-// Usage:
-//
-//	cid, err := starflow.Yield()
-//	return nil, err
-func Yield() (string, error) {
-	cid := shortuuid.New()
-	return cid, yieldError{cid: cid}
-}
 
 type registeredFn struct {
 	fn          func(ctx context.Context, req proto.Message) (proto.Message, error)
@@ -291,9 +271,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// but the wrapped functions will short-circuit and return recorded values.
 	globalsAfterExec, err := starlark.ExecFile(thread, "script", script, globals)
 	if err != nil {
-		if errors.Is(err, yieldError{}) {
-			return zero, nil // expected pause
-		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
@@ -317,10 +294,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// Call main with context and input
 	starlarkOutput, err := starlark.Call(thread, mainFn, starlark.Tuple{starlarkCtx, starlarkInput}, nil)
 	if err != nil {
-		if errors.Is(err, yieldError{}) {
-			// already set to waiting inside yielding function
-			return zero, nil
-		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("error calling main function: %v", err))
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
@@ -379,6 +352,7 @@ func (w *Workflow[Input, Output]) buildGlobals(runID string, history map[string]
 		}
 		globals[name] = w.wrapFn(runID, name, regFn, hist)
 	}
+
 	return globals, nil
 }
 
@@ -453,11 +427,6 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		callFunc := func() error {
 			var innerErr error
 			resp, innerErr = regFn.fn(ctx, req)
-
-			// Do not retry on ErrYield
-			if errors.Is(innerErr, yieldError{}) {
-				return backoff.Permanent(innerErr)
-			}
 			return innerErr
 		}
 
@@ -467,23 +436,6 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		} else {
 			err = callFunc()
 		}
-
-		// Handle yield sentinel separately
-		var yieldErr yieldError
-		if errors.As(err, &yieldErr) {
-			cid := yieldErr.cid
-			evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: name, CorrelationID: cid, Input: inputBytes}
-			// Get updated run state for NextEventID
-			run, err := w.store.GetRun(runID)
-			if err != nil {
-				return starlark.None, fmt.Errorf("failed to get run state: %w", err)
-			}
-			if recErr := w.store.RecordEventAndUpdateStatus(ctx, runID, run.NextEventID, evt, RunStatusWaiting, nil); recErr != nil {
-				return starlark.None, recErr
-			}
-			return starlark.None, err
-		}
-
 		// Marshal response if present
 		var outputBytes []byte
 		if resp != nil {
@@ -529,14 +481,6 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 			return nil, fmt.Errorf("first argument must be context")
 		}
 
-		// If this run was previously sleeping and wake time already passed, just return immediately.
-		run, _ := w.store.GetRun(runID)
-		if run != nil {
-			if run.WakeAt != nil && time.Now().After(*run.WakeAt) {
-				return starlark.None, nil
-			}
-		}
-
 		// duration must be a google.protobuf.Duration proto message
 		durVal, ok := durationVal.(*starlarkproto.Message)
 		if !ok {
@@ -548,49 +492,12 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 			return nil, fmt.Errorf("duration must be google.protobuf.Duration")
 		}
 
-		wake := time.Now().Add(durMsg.AsDuration())
-
-		// create yield error and get cid
-		cid, yerr := Yield()
-
-		// Get current run state to get NextEventID
-		run, err := w.store.GetRun(runID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get run state: %w", err)
+		select {
+		case <-starlarkCtx.ctx.Done():
+			return nil, starlarkCtx.ctx.Err()
+		case <-time.After(durMsg.AsDuration()):
 		}
 
-		// Persist yield event and status/wake
-		evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: "time.sleep", CorrelationID: cid}
-		if recErr := w.store.RecordEventAndUpdateStatus(starlarkCtx.ctx, runID, run.NextEventID, evt, RunStatusWaiting, &wake); recErr != nil {
-			return nil, recErr
-		}
-
-		return nil, yerr
+		return starlark.None, nil
 	})
-}
-
-// Signal delivers an external response to a previously yielded function call, identified by its correlation ID.
-func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID string, resp proto.Message) error {
-	runID, yieldEvent, err := w.store.FindEventByCorrelationID(correlationID)
-	if err != nil {
-		return err
-	}
-
-	if yieldEvent.Type != EventTypeYield {
-		return fmt.Errorf("correlation id %s is not a yield event", correlationID)
-	}
-
-	var outputBytes []byte
-	if resp != nil {
-		outputBytes, _ = proto.Marshal(resp)
-	}
-
-	// Get current run state to get NextEventID
-	run, err := w.store.GetRun(runID)
-	if err != nil {
-		return fmt.Errorf("failed to get run state: %w", err)
-	}
-
-	evt := &Event{Timestamp: time.Now(), Type: EventTypeResume, FunctionName: yieldEvent.FunctionName, CorrelationID: correlationID, Output: outputBytes}
-	return w.store.RecordEventAndUpdateStatus(ctx, runID, run.NextEventID, evt, RunStatusPending, nil)
 }

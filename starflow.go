@@ -16,8 +16,6 @@ const (
 	RunStatusFailed RunStatus = "FAILED"
 	// RunStatusPending indicates that the workflow has been created and is waiting to be picked up by a worker.
 	RunStatusPending RunStatus = "PENDING"
-	// RunStatusWaiting indicates that the workflow yielded and is waiting for an external signal.
-	RunStatusWaiting RunStatus = "WAITING"
 )
 
 // Run represents a single execution of a workflow.
@@ -40,32 +38,22 @@ type Run struct {
 	// Set when claimed by a worker
 	WorkerID   string
 	LeaseUntil *time.Time
-
-	// Set when waiting for a timeout to expire
-	WakeAt *time.Time
 }
 
 // EventType represents the type of an event in the execution history.
 type EventType string
 
 const (
-	// EventTypeCall indicates a call to a Go function from Starlark.
-	EventTypeCall EventType = "CALL"
-	// EventTypeReturn indicates a return from a Go function.
+	EventTypeCall   EventType = "CALL"
 	EventTypeReturn EventType = "RETURN"
-	// EventTypeYield indicates that the function yielded execution and is waiting for an external signal.
-	EventTypeYield EventType = "YIELD"
-	// EventTypeResume indicates that the function resumed execution after being yielded.
-	EventTypeResume EventType = "RESUME"
 )
 
 // Event represents a single event in the execution history of a run.
 type Event struct {
-	Timestamp     time.Time
-	Type          EventType
-	FunctionName  string
-	Input         []byte
-	Output        []byte
-	Error         string
-	CorrelationID string
+	Timestamp    time.Time
+	Type         EventType
+	FunctionName string
+	Input        []byte
+	Output       []byte
+	Error        string
 }

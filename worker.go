@@ -2,7 +2,7 @@ package starflow
 
 import (
 	"context"
-	"errors"
+	"sync"
 	"time"
 
 	"github.com/lithammer/shortuuid/v4"
@@ -11,8 +11,9 @@ import (
 
 // Worker executes pending workflow runs in the background.
 type Worker[Input proto.Message, Output proto.Message] struct {
-	wf   *Workflow[Input, Output]
-	poll time.Duration
+	wf       *Workflow[Input, Output]
+	workerID string
+	poll     time.Duration
 }
 
 // NewWorker creates a worker for a workflow with the given poll interval.
@@ -20,36 +21,31 @@ func (w *Workflow[Input, Output]) NewWorker(poll time.Duration) *Worker[Input, O
 	if poll == 0 {
 		poll = time.Second
 	}
-	return &Worker[Input, Output]{wf: w, poll: poll}
+	return &Worker[Input, Output]{wf: w, workerID: shortuuid.New(), poll: poll}
 }
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 func (wk *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	now := time.Now()
-	runs, err := wk.wf.store.ListRuns(ctx, RunStatusPending, RunStatusWaiting)
+	runs, err := wk.wf.store.ListRuns(ctx, RunStatusPending)
 	if err != nil {
 		return
 	}
-	for _, r := range runs {
-		// If waiting, ensure wake time reached
-		if r.Status == RunStatusWaiting {
-			if r.WakeAt == nil || r.WakeAt.After(now) {
-				continue // not yet
-			}
-		}
 
-		leaseUntil := time.Now().Add(5 * time.Second)
-		workerID := "worker" + shortuuid.New()
-		ok, err := wk.wf.store.ClaimRun(ctx, r.ID, workerID, leaseUntil)
-		if err != nil || !ok {
-			continue
-		}
-		// Execute the run; outcome handling is inside execute/resumeRun.
-		_, err = wk.wf.resumeRun(ctx, r.ID)
-		if errors.Is(err, ErrConcurrentUpdate) {
-			continue
-		}
+	var wg sync.WaitGroup
+	for _, r := range runs {
+		wg.Add(1)
+		go func(run *Run) {
+			defer wg.Done()
+			leaseUntil := time.Now().Add(5 * time.Second)
+			ok, err := wk.wf.store.ClaimRun(ctx, run.ID, wk.workerID, leaseUntil)
+			if err != nil || !ok {
+				return
+			}
+
+			_, _ = wk.wf.resumeRun(ctx, run.ID)
+		}(r)
 	}
+	wg.Wait()
 }
 
 // Start begins a background goroutine that polls for and executes pending runs.

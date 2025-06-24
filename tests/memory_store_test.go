@@ -213,29 +213,10 @@ func (s *MemoryStore) UpdateRunError(ctx context.Context, runID string, errMsg s
 	return nil
 }
 
-// FindEventByCorrelationID retrieves the first event with the given correlationID across all runs.
-// It returns the associated runID together with the event.
-func (s *MemoryStore) FindEventByCorrelationID(correlationID string) (string, *starflow.Event, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for runID, events := range s.events {
-		for _, event := range events {
-			if event.CorrelationID == correlationID {
-				eventCopy := *event
-				return runID, &eventCopy, nil
-			}
-		}
-	}
-
-	return "", nil, fmt.Errorf("event with correlation ID %s not found", correlationID)
-}
-
 // RecordEventAndUpdateStatus performs the following atomically in a single transaction:
 //  1. Insert the supplied event (if not nil)
 //  2. Update the run's status to the supplied value (if status != "")
-//  3. Update wake_at timestamp (may be nil to clear)
-func (s *MemoryStore) RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *starflow.Event, status starflow.RunStatus, wakeAt *time.Time) error {
+func (s *MemoryStore) RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *starflow.Event, status starflow.RunStatus) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -252,10 +233,12 @@ func (s *MemoryStore) RecordEventAndUpdateStatus(ctx context.Context, runID stri
 	// Update status if provided
 	if status != "" {
 		run.Status = status
+		// Clear lease when status changes to PENDING (after a RESUME)
+		if status == starflow.RunStatusPending {
+			run.WorkerID = ""
+			run.LeaseUntil = nil
+		}
 	}
-
-	// Update wake_at if provided
-	run.WakeAt = wakeAt
 
 	// Add event if provided
 	if event != nil {

@@ -37,12 +37,6 @@ type Store interface {
 	// On success the store increments NextEventID by one.
 	RecordEvent(runID string, expectedNextID int, event *Event) error
 
-	// RecordEventAndUpdateStatus performs the following atomically in a single transaction:
-	//   1. Record the supplied event
-	//   2. Update the run's status to the supplied value
-	//   3. Update wake_at timestamp (may be nil to clear)
-	RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *Event, status RunStatus, wakeAt *time.Time) error
-
 	// GetEvents retrieves all events for a specific run, ordered by time.
 	GetEvents(runID string) ([]*Event, error)
 
@@ -51,8 +45,4 @@ type Store interface {
 
 	// UpdateRunError sets the error message for a run.
 	UpdateRunError(ctx context.Context, runID string, errMsg string) error
-
-	// FindEventByCorrelationID retrieves the first event with the given correlationID across all runs.
-	// It returns the associated runID together with the event.
-	FindEventByCorrelationID(correlationID string) (string, *Event, error)
 }
