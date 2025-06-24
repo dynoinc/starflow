@@ -16,6 +16,17 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protodesc"
+	"google.golang.org/protobuf/reflect/protoreflect"
+	"google.golang.org/protobuf/reflect/protoregistry"
+
+	_ "google.golang.org/protobuf/types/known/anypb"
+	_ "google.golang.org/protobuf/types/known/durationpb"
+	_ "google.golang.org/protobuf/types/known/emptypb"
+	_ "google.golang.org/protobuf/types/known/structpb"
+	_ "google.golang.org/protobuf/types/known/timestamppb"
+	_ "google.golang.org/protobuf/types/known/typepb"
+	_ "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 type registeredFn struct {
@@ -48,15 +59,29 @@ func WithRetryPolicy(b backoff.BackOff) Option {
 	}
 }
 
+// customProtoRegistry combines the global registry with custom proto files
+type customProtoRegistry struct {
+	globalRegistry *protoregistry.Files
+	customFiles    map[string]protoreflect.FileDescriptor
+}
+
+func newCustomProtoRegistry() *customProtoRegistry {
+	return &customProtoRegistry{
+		globalRegistry: protoregistry.GlobalFiles,
+		customFiles:    make(map[string]protoreflect.FileDescriptor),
+	}
+}
+
 // Worker executes pending workflow runs in the background.
 type Worker[Input proto.Message, Output proto.Message] struct {
 	store    Store
 	workerID string
 	poll     time.Duration
 
-	tracer   trace.Tracer
-	registry map[string]registeredFn
-	types    map[string]proto.Message
+	tracer        trace.Tracer
+	registry      map[string]registeredFn
+	types         map[string]proto.Message
+	protoRegistry protodesc.Resolver
 }
 
 // NewWorker creates a worker for a workflow with the given poll interval.
@@ -65,14 +90,18 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, poll time
 		poll = time.Second
 	}
 
+	// Create a new proto registry that includes well-known types
+	protoRegistry := newCustomProtoRegistry()
+
 	return &Worker[Input, Output]{
 		store:    store,
 		workerID: shortuuid.New(),
 		poll:     poll,
 
-		tracer:   otel.Tracer("starflow.worker"),
-		registry: make(map[string]registeredFn),
-		types:    make(map[string]proto.Message),
+		tracer:        otel.Tracer("starflow.worker"),
+		registry:      make(map[string]registeredFn),
+		types:         make(map[string]proto.Message),
+		protoRegistry: protoRegistry,
 	}
 }
 
@@ -127,6 +156,16 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 	w.types[reg.name+"_response"] = resInstance
 }
 
+// RegisterProto registers a proto file descriptor with the worker's proto registry.
+// This allows Starlark scripts to access the proto definitions.
+func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) error {
+	if reg, ok := w.protoRegistry.(*customProtoRegistry); ok {
+		reg.customFiles[fileDescriptor.Path()] = fileDescriptor
+		return nil
+	}
+	return fmt.Errorf("protoRegistry is not a customProtoRegistry")
+}
+
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 	runs, err := w.store.ListRuns(ctx, RunStatusPending)
@@ -176,4 +215,28 @@ func (w *Worker[Input, Output]) RegisteredNames() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (r *customProtoRegistry) FindDescriptorByName(name protoreflect.FullName) (protoreflect.Descriptor, error) {
+	// Try custom files first
+	for _, fd := range r.customFiles {
+		if desc := fd.Messages().ByName(name.Name()); desc != nil {
+			return desc, nil
+		}
+		if desc := fd.Enums().ByName(name.Name()); desc != nil {
+			return desc, nil
+		}
+		if desc := fd.Services().ByName(name.Name()); desc != nil {
+			return desc, nil
+		}
+	}
+	// Then try global registry
+	return r.globalRegistry.FindDescriptorByName(name)
+}
+
+func (r *customProtoRegistry) FindFileByPath(path string) (protoreflect.FileDescriptor, error) {
+	if fd, ok := r.customFiles[path]; ok {
+		return fd, nil
+	}
+	return r.globalRegistry.FindFileByPath(path)
 }

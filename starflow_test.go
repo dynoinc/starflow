@@ -18,6 +18,7 @@ func TestWorkflow(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
@@ -28,7 +29,7 @@ func TestWorkflow(t *testing.T) {
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	output = starflow_test.pingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 	return output
 `
@@ -66,6 +67,7 @@ func TestWorkflow_ReplaySupport(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	httpCallFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "HTTP response simulated"}, nil
@@ -84,7 +86,7 @@ def main(ctx, input):
 	print("Starting workflow with input:", input.message)
 	
 	# Load the proto file to access message types
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	
 	# Make an HTTP call
 	http_req = ping_proto.PingRequest(message="http_" + input.message)
@@ -147,6 +149,7 @@ func TestWorkflow_StarlarkMathImport(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
@@ -160,7 +163,7 @@ load("math", "sqrt")
 def main(ctx, input):
     # Use math.sqrt to compute the square root of 16
     result = sqrt(16)
-    return proto.file("ping.proto").PingResponse(message=str(result))
+    return proto.file("suite/proto/ping.proto").PingResponse(message=str(result))
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
@@ -183,6 +186,7 @@ func TestWorkflow_RetryPolicy(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	attempts := 0
 	flakyFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -200,7 +204,7 @@ func TestWorkflow_RetryPolicy(t *testing.T) {
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	return starflow_test.flakyFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
@@ -230,6 +234,9 @@ def main(ctx, input):
 func TestWorkflow_SleepFunction(t *testing.T) {
 	store := inmemory.New(t)
 
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+
 	script := `
 load("proto", "proto")
 load("time", "sleep")
@@ -237,7 +244,7 @@ load("time", "sleep")
 def main(ctx, input):
 	dur_proto = proto.file("google/protobuf/duration.proto")
 	sleep(ctx=ctx, duration=dur_proto.Duration(seconds=0, nanos=5000000))  # 5ms sleep
-	return proto.file("ping.proto").PingResponse(message="woke")
+	return proto.file("suite/proto/ping.proto").PingResponse(message="woke")
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
@@ -255,6 +262,7 @@ func TestWorkflow_Failure(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	// Register a function that always fails
 	failingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -266,7 +274,7 @@ func TestWorkflow_Failure(t *testing.T) {
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	return starflow_test.failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
@@ -329,8 +337,9 @@ func TestWorkflow_FullPackagePath(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
-	starflow.Register(wf, PingPong)
+	starflow.Register(wf, PingPong, starflow.WithName("tests_test.PingPong"))
 	for _, name := range wf.RegisteredNames() {
 		t.Logf("Registered: %s", name)
 	}
@@ -339,7 +348,7 @@ func TestWorkflow_FullPackagePath(t *testing.T) {
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	output = tests_test.PingPong(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 	return output
 `
@@ -363,10 +372,11 @@ func TestWorkflow_DeterministicFunctions(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	script := `
 load("proto", "proto")
-load("time", "sleep", "now")
+load("time", "now")
 load("rand", "int")
 
 def main(ctx, input):
@@ -374,7 +384,7 @@ def main(ctx, input):
 	now2 = now(ctx=ctx)
 	rand1 = int(ctx=ctx, max=100)
 	rand2 = int(ctx=ctx, max=200)
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	message = "now1: " + str(now1) + ", now2: " + str(now2) + ", rand1: " + str(rand1) + ", rand2: " + str(rand2)
 	return ping_proto.PingResponse(message=message)
 `
@@ -428,6 +438,7 @@ func TestWorkflow_YieldError(t *testing.T) {
 	store := inmemory.New(t)
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	var called int
 	var cid string
@@ -444,7 +455,7 @@ func TestWorkflow_YieldError(t *testing.T) {
 load("proto", "proto")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
+	ping_proto = proto.file("suite/proto/ping.proto")
 	starflow_test.yieldFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 	return ping_proto.PingResponse(message="should not be reached")
 `
@@ -476,4 +487,41 @@ def main(ctx, input):
 	run, err = client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+}
+
+func TestWorkflow_StringValue(t *testing.T) {
+	store := inmemory.New(t)
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	// Note: No proto registration needed for well-known types
+
+	script := `
+load("proto", "proto")
+
+def main(ctx, input):
+	# Test StringValue well-known proto type
+	
+	# Create a StringValue message
+	stringvalue_proto = proto.file("google/protobuf/wrappers.proto")
+	string_value = stringvalue_proto.StringValue(value="test string value")
+	
+	# Return a PingResponse with the StringValue info
+	ping_proto = proto.file("suite/proto/ping.proto")
+	message = "StringValue: " + string_value.value + ", Input: " + input.message
+	return ping_proto.PingResponse(message=message)
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "hello world"})
+	require.NoError(t, err)
+
+	wf.ProcessOnce(t.Context())
+
+	run, err := client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+
+	var outputResp testpb.PingResponse
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
+	require.Equal(t, "StringValue: test string value, Input: hello world", outputResp.Message)
 }

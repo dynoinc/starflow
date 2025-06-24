@@ -19,7 +19,6 @@ import (
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -288,7 +287,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		Print: func(_ *starlark.Thread, msg string) { fmt.Println(msg) },
 		Load: func(thread *starlark.Thread, module string) (starlark.StringDict, error) {
 			if module == "proto" {
-				protoModule := starlarkproto.NewModule(protoregistry.GlobalFiles)
+				protoModule := starlarkproto.NewModule(t.w.protoRegistry)
 				return starlark.StringDict{
 					"proto": protoModule,
 				}, nil
