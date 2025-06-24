@@ -17,6 +17,7 @@ import (
 	"go.starlark.net/lib/math"
 	starlarktime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
+	"go.starlark.net/syntax"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -269,7 +270,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 
 	// When resuming, we still execute the whole script from the beginning,
 	// but the wrapped functions will short-circuit and return recorded values.
-	globalsAfterExec, err := starlark.ExecFile(thread, "script", script, globals)
+	globalsAfterExec, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "script", script, globals)
 	if err != nil {
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
