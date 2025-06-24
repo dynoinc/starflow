@@ -39,12 +39,11 @@ func popEvent[ET EventMetadata, Input proto.Message, Output proto.Message](t *th
 	}
 
 	nextEvent := t.events[0]
-	t.events = t.events[1:]
-
 	if nextEvent.Type != zero.EventType() {
 		return zero, fmt.Errorf("expected event type %s, got %s", zero.EventType(), nextEvent.Type), false
 	}
 
+	t.events = t.events[1:]
 	return nextEvent.Metadata.(ET), nil, true
 }
 
