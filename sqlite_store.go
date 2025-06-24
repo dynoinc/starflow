@@ -275,3 +275,49 @@ func (s *SQLiteStore) UpdateRunWakeUp(ctx context.Context, runID string, wakeAt 
 	_, err := s.db.ExecContext(ctx, "UPDATE runs SET wake_at = ?, updated_at = ? WHERE id = ?", wakeAt, time.Now(), runID)
 	return err
 }
+
+// UpdateRunStatusAndRecordEvent executes event insert and status/wake_at update atomically.
+func (s *SQLiteStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, status RunStatus, event *Event, wakeAt *time.Time) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		} else {
+			_ = tx.Commit()
+		}
+	}()
+
+	now := time.Now()
+
+	if event != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO events (run_id, timestamp, type, function_name, correlation_id, input, output, error) VALUES (?,?,?,?,?,?,?,?)`,
+			runID, event.Timestamp, event.Type, event.FunctionName, event.CorrelationID, event.Input, event.Output, event.Error); err != nil {
+			return err
+		}
+	}
+
+	setParts := []string{"updated_at = ?"}
+	args := []interface{}{now}
+
+	if status != "" {
+		setParts = append(setParts, "status = ?")
+		args = append(args, status)
+	}
+
+	if wakeAt != nil {
+		setParts = append(setParts, "wake_at = ?")
+		args = append(args, wakeAt)
+	}
+
+	args = append(args, runID)
+
+	query := fmt.Sprintf("UPDATE runs SET %s WHERE id = ?", strings.Join(setParts, ", "))
+	if _, err = tx.ExecContext(ctx, query, args...); err != nil {
+		return err
+	}
+
+	return nil
+}

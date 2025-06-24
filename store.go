@@ -44,4 +44,10 @@ type Store interface {
 
 	// UpdateRunWakeUp sets the wake_at timestamp for the run. Use zero time to clear.
 	UpdateRunWakeUp(ctx context.Context, runID string, wakeAt *time.Time) error
+
+	// UpdateRunStatusAndRecordEvent performs the following atomically in a single transaction:
+	//   1. Insert the supplied event (if not nil)
+	//   2. Update the run's status to the supplied value (if status != "")
+	//   3. Update wake_at timestamp (may be nil to clear)
+	UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, status RunStatus, event *Event, wakeAt *time.Time) error
 }

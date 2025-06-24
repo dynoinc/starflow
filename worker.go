@@ -34,9 +34,6 @@ func (wk *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			if r.WakeAt == nil || r.WakeAt.After(now) {
 				continue // not yet
 			}
-			// transition to pending first
-			_ = wk.wf.store.UpdateRunStatus(ctx, r.ID, RunStatusPending)
-			_ = wk.wf.store.UpdateRunWakeUp(ctx, r.ID, nil)
 		}
 
 		// Attempt to claim the run by setting it to RUNNING; ignore if already claimed.

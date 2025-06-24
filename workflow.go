@@ -330,6 +330,10 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// Call main with context and input
 	starlarkOutput, err := starlark.Call(thread, mainFn, starlark.Tuple{starlarkCtx, starlarkInput}, nil)
 	if err != nil {
+		if errors.Is(err, ErrYield) {
+			// already set to waiting inside yielding function
+			return zero, nil
+		}
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
@@ -485,7 +489,6 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 
 		if regFn.retryPolicy != nil {
 			policy := backoff.WithContext(regFn.retryPolicy, ctx)
-			policy.Reset()
 			err = backoff.Retry(callFunc, policy)
 		} else {
 			err = callFunc()
@@ -497,18 +500,9 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			if yerr, ok := err.(interface{ CorrelationID() string }); ok {
 				cid = yerr.CorrelationID()
 			}
-			if recErr := w.store.RecordEvent(runID, &Event{
-				Timestamp:     time.Now(),
-				Type:          EventTypeYield,
-				FunctionName:  name,
-				CorrelationID: cid,
-				Input:         inputBytes,
-			}); recErr != nil {
-				return nil, fmt.Errorf("failed to record yield event: %w", recErr)
-			}
-			// Set status to waiting
-			if errStatus := w.store.UpdateRunStatus(ctx, runID, RunStatusWaiting); errStatus != nil {
-				return nil, errStatus
+			evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: name, CorrelationID: cid, Input: inputBytes}
+			if recErr := w.store.UpdateRunStatusAndRecordEvent(ctx, runID, RunStatusWaiting, evt, nil); recErr != nil {
+				return nil, recErr
 			}
 			return nil, err
 		}
@@ -560,7 +554,7 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 		// If this run was previously sleeping and wake time already passed, just return immediately.
 		run, _ := w.store.GetRun(runID)
 		if run != nil {
-			if run.WakeAt == nil || time.Now().After(*run.WakeAt) {
+			if run.WakeAt != nil && time.Now().After(*run.WakeAt) {
 				return starlark.None, nil
 			}
 		}
@@ -583,22 +577,10 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 		// create yield error and get cid
 		cid, yerr := Yield()
 
-		// Persist yield event
-		if recErr := w.store.RecordEvent(runID, &Event{
-			Timestamp:     time.Now(),
-			Type:          EventTypeYield,
-			FunctionName:  "time.sleep",
-			CorrelationID: cid,
-		}); recErr != nil {
+		// Persist yield event and status/wake
+		evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: "time.sleep", CorrelationID: cid}
+		if recErr := w.store.UpdateRunStatusAndRecordEvent(starlarkCtx.ctx, runID, RunStatusWaiting, evt, &wake); recErr != nil {
 			return nil, recErr
-		}
-
-		// Set wake_at and status
-		if err := w.store.UpdateRunWakeUp(starlarkCtx.ctx, runID, &wake); err != nil {
-			return nil, err
-		}
-		if err := w.store.UpdateRunStatus(starlarkCtx.ctx, runID, RunStatusWaiting); err != nil {
-			return nil, err
 		}
 
 		return nil, yerr
@@ -622,16 +604,6 @@ func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID stri
 		outputBytes, _ = proto.Marshal(resp)
 	}
 
-	if err := w.store.RecordEvent(runID, &Event{
-		Timestamp:     time.Now(),
-		Type:          EventTypeReturn,
-		FunctionName:  yieldEvent.FunctionName,
-		CorrelationID: correlationID,
-		Output:        outputBytes,
-	}); err != nil {
-		return err
-	}
-
-	// Mark run ready
-	return w.store.UpdateRunStatus(ctx, runID, RunStatusPending)
+	evt := &Event{Timestamp: time.Now(), Type: EventTypeReturn, FunctionName: yieldEvent.FunctionName, CorrelationID: correlationID, Output: outputBytes}
+	return w.store.UpdateRunStatusAndRecordEvent(ctx, runID, RunStatusPending, evt, nil)
 }

@@ -91,6 +91,11 @@ def main(ctx, input):
 	if outputMsg.Message != "pong: hello" {
 		t.Errorf("expected output message to be 'pong: hello', got %s", outputMsg.Message)
 	}
+
+	fmt.Println("events:")
+	for _, e := range events {
+		fmt.Printf("%+v\n", *e)
+	}
 }
 
 func TestWorkflow_Resume(t *testing.T) {
@@ -205,6 +210,11 @@ def main(ctx, input):
 	if len(events) != 6 {
 		t.Fatalf("expected 6 events after second processing, got %d", len(events))
 	}
+
+	fmt.Println("events:")
+	for _, e := range events {
+		fmt.Printf("%+v\n", *e)
+	}
 }
 
 // TestWorkflowLibraryUsage demonstrates how to use the starflow library.
@@ -315,6 +325,11 @@ def main(ctx, input):
 		if expectedFunc != event.FunctionName {
 			t.Errorf("event %d: expected function %s, got %s", i, expectedFunc, event.FunctionName)
 		}
+	}
+
+	fmt.Println("events:")
+	for _, e := range events {
+		fmt.Printf("%+v\n", *e)
 	}
 
 	t.Log("✅ Workflow completed successfully!")
@@ -469,7 +484,7 @@ def main(ctx, input):
 		t.Fatalf("expected WAITING, got %s", run.Status)
 	}
 
-	time.Sleep(10 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	worker.ProcessOnce(context.Background()) // should complete
 
@@ -529,6 +544,7 @@ def main(ctx, input):
 
 	// Find the correlation ID from the last event
 	events, err := store.GetEvents(runID)
+	fmt.Println("events:", events)
 	if err != nil || len(events) == 0 {
 		t.Fatalf("failed to get events: %v", err)
 	}
@@ -557,5 +573,10 @@ def main(ctx, input):
 	}
 	if run.Status != starflow.RunStatusCompleted {
 		t.Errorf("expected COMPLETED after signal, got %s", run.Status)
+	}
+
+	fmt.Println("events:")
+	for _, e := range events {
+		fmt.Printf("%+v\n", *e)
 	}
 }
