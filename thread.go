@@ -2,6 +2,7 @@ package starflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"reflect"
@@ -422,7 +423,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		}
 
 		if len(t.events) > 0 {
-			// verify the next event is a call event with same args
 			nextEvent := t.events[0]
 			t.events = t.events[1:]
 			if nextEvent.Type != EventTypeCall {
@@ -461,28 +461,68 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		}
 
 		if len(t.events) > 0 {
-			// verify the next event is a return event with same args
 			nextEvent := t.events[0]
 			t.events = t.events[1:]
-			if nextEvent.Type != EventTypeReturn {
-				return starlark.None, fmt.Errorf("expected return event, got %s", nextEvent.Type)
-			}
 
-			returnEvent, ok := nextEvent.AsReturnEvent()
-			if !ok {
-				return starlark.None, fmt.Errorf("expected return event metadata")
-			}
-
-			// re-use the output from the return event
-			if returnEvent.Output != nil {
-				respProto := proto.Clone(regFn.resType)
-				if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
-					return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
+			switch nextEvent.Type {
+			case EventTypeReturn:
+				returnEvent, ok := nextEvent.AsReturnEvent()
+				if !ok {
+					return starlark.None, fmt.Errorf("expected return event metadata")
 				}
 
-				return starlarkproto.MakeMessage(respProto), nil
-			} else if returnEvent.Error != nil {
-				return starlark.None, returnEvent.Error
+				if returnEvent.Error != nil {
+					return starlark.None, returnEvent.Error
+				}
+
+				if returnEvent.Output != nil {
+					respProto := proto.Clone(regFn.resType)
+					if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
+						return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
+					}
+
+					return starlarkproto.MakeMessage(respProto), nil
+				} else {
+					return starlark.None, nil
+				}
+
+			case EventTypeYield:
+				yieldEvent, ok := nextEvent.AsYieldEvent()
+				if !ok {
+					return starlark.None, fmt.Errorf("expected yield event metadata")
+				}
+
+				if len(t.events) == 0 {
+					// still waiting for the signal to resume. ideally we should have not tried to resume the run
+					// but anyways, life happens.
+					return starlark.None, &YieldError{cid: yieldEvent.SignalID}
+				}
+
+				nextEvent := t.events[0]
+				t.events = t.events[1:]
+				if nextEvent.Type != EventTypeResume {
+					return starlark.None, fmt.Errorf("expected resume event, got %s", nextEvent.Type)
+				}
+
+				resumeEvent, ok := nextEvent.AsResumeEvent()
+				if !ok {
+					return starlark.None, fmt.Errorf("expected resume event metadata")
+				}
+
+				if resumeEvent.SignalID != yieldEvent.SignalID {
+					return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID, resumeEvent.SignalID)
+				}
+
+				if resumeEvent.Output != nil {
+					respProto := proto.Clone(regFn.resType)
+					if err := resumeEvent.Output.UnmarshalTo(respProto); err != nil {
+						return starlark.None, fmt.Errorf("failed to unmarshal resume event output: %w", err)
+					}
+
+					return starlarkproto.MakeMessage(respProto), nil
+				} else {
+					return starlark.None, nil
+				}
 			}
 		}
 
@@ -496,11 +536,15 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			resp, innerErr = regFn.fn(ctx, req)
 			if innerErr != nil {
 				span.SetStatus(codes.Error, innerErr.Error())
-			} else {
-				span.SetStatus(codes.Ok, "success")
+				if errors.Is(innerErr, &YieldError{}) {
+					return backoff.Permanent(innerErr)
+				}
+
+				return innerErr
 			}
 
-			return innerErr
+			span.SetStatus(codes.Ok, "success")
+			return nil
 		}
 
 		var callErr error
@@ -513,10 +557,18 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 
 		event := &Event{
 			Timestamp: time.Now(),
-			Type:      EventTypeReturn,
 		}
-		if callErr != nil {
+
+		var yerr *YieldError
+		if errors.As(callErr, &yerr) {
+			wrapFnSpan.SetStatus(codes.Error, yerr.Error())
+
+			event.Type = EventTypeYield
+			event.Metadata = YieldEvent{SignalID: yerr.cid}
+		} else if callErr != nil {
 			wrapFnSpan.SetStatus(codes.Error, callErr.Error())
+
+			event.Type = EventTypeReturn
 			event.Metadata = ReturnEvent{Error: callErr}
 		} else {
 			wrapFnSpan.SetStatus(codes.Ok, "success")
@@ -525,6 +577,7 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
 			}
 
+			event.Type = EventTypeReturn
 			event.Metadata = ReturnEvent{Output: outputAny}
 		}
 

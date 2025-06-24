@@ -10,6 +10,7 @@ import (
 	"github.com/dynoinc/starflow"
 	testpb "github.com/dynoinc/starflow/tests/proto"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 func TestWorkflow(t *testing.T) {
@@ -420,4 +421,52 @@ def main(ctx, input):
 	t.Logf("Run ID: %s", runID)
 	t.Logf("Output: %s", outputResp.Message)
 	t.Logf("Events recorded: %d", len(events))
+}
+
+func TestWorkflow_YieldError(t *testing.T) {
+	store := NewMemoryStore(t)
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+
+	var cid string
+	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+		var err error
+		cid, err = starflow.NewYieldError()
+		return nil, err
+	}
+	starflow.Register(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
+
+	script := `
+load("proto", "proto")
+
+def main(ctx, input):
+	ping_proto = proto.file("ping.proto")
+	starflow_test.yieldFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return ping_proto.PingResponse(message="should not be reached")
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
+	require.NoError(t, err)
+
+	wf.ProcessOnce(t.Context())
+
+	run, err := client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusYielded, run.Status)
+
+	outputAny, err := anypb.New(&testpb.PingResponse{Message: "resumed"})
+	require.NoError(t, err)
+
+	err = client.Signal(t.Context(), cid, outputAny)
+	require.NoError(t, err)
+
+	run, err = client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusPending, run.Status)
+
+	wf.ProcessOnce(t.Context())
+	run, err = client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 }

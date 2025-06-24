@@ -20,6 +20,7 @@ type MemoryStore struct {
 	scripts map[string][]byte
 	runs    map[string]*starflow.Run
 	events  map[string][]*starflow.Event
+	yields  map[string]string
 }
 
 // NewMemoryStore creates a new MemoryStore.
@@ -28,6 +29,7 @@ func NewMemoryStore(t *testing.T) *MemoryStore {
 		scripts: make(map[string][]byte),
 		runs:    make(map[string]*starflow.Run),
 		events:  make(map[string][]*starflow.Event),
+		yields:  make(map[string]string),
 	}
 }
 
@@ -158,16 +160,51 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
-	if event.Type == starflow.EventTypeReturn {
+	switch event.Type {
+	case starflow.EventTypeReturn:
 		if returnEvent, ok := event.AsReturnEvent(); ok && returnEvent.Error != nil {
 			storedRun.Status = starflow.RunStatusFailed
 			storedRun.Error = returnEvent.Error
+		}
+	case starflow.EventTypeYield:
+		if yieldEvent, ok := event.AsYieldEvent(); ok {
+			storedRun.Status = starflow.RunStatusYielded
+			s.yields[yieldEvent.SignalID] = runID
 		}
 	}
 
 	storedRun.NextEventID++
 	storedRun.UpdatedAt = time.Now()
 	return storedRun.NextEventID, nil
+}
+
+func (s *MemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	runID, exists := s.yields[cid]
+	if !exists {
+		return fmt.Errorf("signal with ID %s not found", cid)
+	}
+
+	run, exists := s.runs[runID]
+	if !exists {
+		return fmt.Errorf("run with ID %s not found", runID)
+	}
+
+	s.events[runID] = append(s.events[runID], &starflow.Event{
+		Type:     starflow.EventTypeResume,
+		Metadata: starflow.ResumeEvent{SignalID: cid, Output: output},
+	})
+
+	run.NextEventID++
+	run.Status = starflow.RunStatusPending
+	run.UpdatedAt = time.Now()
+	run.WorkerID = ""
+	run.LeaseUntil = nil
+
+	delete(s.yields, cid)
+	return nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.

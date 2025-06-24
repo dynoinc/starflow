@@ -58,3 +58,7 @@ func (c *Client[Input]) GetRun(ctx context.Context, runID string) (*Run, error) 
 func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
 	return c.store.GetEvents(ctx, runID)
 }
+
+func (c *Client[Input]) Signal(ctx context.Context, cid string, output *anypb.Any) error {
+	return c.store.Signal(ctx, cid, output)
+}

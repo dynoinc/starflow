@@ -1,10 +1,25 @@
 package starflow
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
 )
+
+type YieldError struct {
+	cid string
+}
+
+func (e *YieldError) Error() string {
+	return fmt.Sprintf("yield error: %s", e.cid)
+}
+
+func NewYieldError() (string, error) {
+	cid := shortuuid.New()
+	return cid, &YieldError{cid: cid}
+}
 
 // RunStatus represents the status of a workflow run.
 type RunStatus string
@@ -18,6 +33,8 @@ const (
 	RunStatusFailed RunStatus = "FAILED"
 	// RunStatusPending indicates that the workflow has been created and is waiting to be picked up by a worker.
 	RunStatusPending RunStatus = "PENDING"
+	// RunStatusYielded indicates that the workflow has yielded and waiting for signal to resume.
+	RunStatusYielded RunStatus = "YIELDED"
 )
 
 // Run represents a single execution of a workflow.
@@ -51,6 +68,8 @@ const (
 	EventTypeSleep   EventType = "SLEEP"
 	EventTypeTimeNow EventType = "TIME_NOW"
 	EventTypeRandInt EventType = "RAND_INT"
+	EventTypeYield   EventType = "YIELD"
+	EventTypeResume  EventType = "RESUME"
 )
 
 // EventMetadata interface for different event types
@@ -93,6 +112,19 @@ type RandIntEvent struct {
 
 func (r RandIntEvent) EventType() EventType { return EventTypeRandInt }
 
+type YieldEvent struct {
+	SignalID string
+}
+
+func (y YieldEvent) EventType() EventType { return EventTypeYield }
+
+type ResumeEvent struct {
+	SignalID string
+	Output   *anypb.Any
+}
+
+func (r ResumeEvent) EventType() EventType { return EventTypeResume }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp time.Time
@@ -124,4 +156,14 @@ func (e Event) AsTimeNowEvent() (TimeNowEvent, bool) {
 func (e Event) AsRandIntEvent() (RandIntEvent, bool) {
 	randIntEvent, ok := e.Metadata.(RandIntEvent)
 	return randIntEvent, ok
+}
+
+func (e Event) AsYieldEvent() (YieldEvent, bool) {
+	yieldEvent, ok := e.Metadata.(YieldEvent)
+	return yieldEvent, ok
+}
+
+func (e Event) AsResumeEvent() (ResumeEvent, bool) {
+	resumeEvent, ok := e.Metadata.(ResumeEvent)
+	return resumeEvent, ok
 }
