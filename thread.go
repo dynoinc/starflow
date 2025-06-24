@@ -52,6 +52,68 @@ func (t *thread[Input, Output]) globals() (starlark.StringDict, error) {
 	return globals, nil
 }
 
+// makeSleepBuiltin returns a starlark builtin implementing durable sleep.
+func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("sleep", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var ctxVal starlark.Value
+		var durationVal starlark.Value
+		if err := starlark.UnpackArgs("sleep", args, kwargs, "ctx", &ctxVal, "duration", &durationVal); err != nil {
+			return nil, err
+		}
+
+		starlarkCtx, ok := ctxVal.(*starlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("first argument must be context")
+		}
+
+		// duration must be a google.protobuf.Duration proto message
+		durVal, ok := durationVal.(*starlarkproto.Message)
+		if !ok {
+			return nil, fmt.Errorf("duration must be google.protobuf.Duration proto message")
+		}
+
+		durMsg, ok := durVal.ProtoReflect().Interface().(*durationpb.Duration)
+		if !ok {
+			return nil, fmt.Errorf("duration must be google.protobuf.Duration")
+		}
+
+		sleepDuration := durMsg.AsDuration()
+		if len(t.events) > 0 {
+			nextEvent := t.events[0]
+			t.events = t.events[1:]
+			if nextEvent.Type != EventTypeSleep {
+				return nil, fmt.Errorf("expected sleep event, got %s", nextEvent.Type)
+			}
+
+			sleepEvent, ok := nextEvent.AsSleepEvent()
+			if !ok {
+				return nil, fmt.Errorf("expected sleep event metadata")
+			}
+
+			sleepDuration = time.Until(sleepEvent.WakeupAt)
+		} else {
+			// record a sleep event
+			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
+				Timestamp: time.Now(),
+				Type:      EventTypeSleep,
+				Metadata:  SleepEvent{WakeupAt: time.Now().Add(sleepDuration)},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to record sleep event: %w", err)
+			}
+			t.run.NextEventID = nextEventID
+		}
+
+		select {
+		case <-starlarkCtx.ctx.Done():
+			return nil, starlarkCtx.ctx.Err()
+		case <-time.After(sleepDuration):
+		}
+
+		return starlark.None, nil
+	})
+}
+
 func runThread[Input proto.Message, Output proto.Message](
 	ctx context.Context,
 	w *Worker[Input, Output],
@@ -93,7 +155,7 @@ func runThread[Input proto.Message, Output proto.Message](
 			if module == "time" {
 				members := make(starlark.StringDict)
 				maps.Copy(members, starlarktime.Module.Members)
-				members["sleep"] = makeSleepBuiltin()
+				members["sleep"] = t.makeSleepBuiltin()
 				return members, nil
 			}
 			if module == "math" {
@@ -313,40 +375,5 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		t.run.NextEventID = nextEventID
 
 		return starlarkproto.MakeMessage(resp), callErr
-	})
-}
-
-// makeSleepBuiltin returns a starlark builtin implementing durable sleep.
-func makeSleepBuiltin() *starlark.Builtin {
-	return starlark.NewBuiltin("sleep", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		var ctxVal starlark.Value
-		var durationVal starlark.Value
-		if err := starlark.UnpackArgs("sleep", args, kwargs, "ctx", &ctxVal, "duration", &durationVal); err != nil {
-			return nil, err
-		}
-
-		starlarkCtx, ok := ctxVal.(*starlarkContext)
-		if !ok {
-			return nil, fmt.Errorf("first argument must be context")
-		}
-
-		// duration must be a google.protobuf.Duration proto message
-		durVal, ok := durationVal.(*starlarkproto.Message)
-		if !ok {
-			return nil, fmt.Errorf("duration must be google.protobuf.Duration proto message")
-		}
-
-		durMsg, ok := durVal.ProtoReflect().Interface().(*durationpb.Duration)
-		if !ok {
-			return nil, fmt.Errorf("duration must be google.protobuf.Duration")
-		}
-
-		select {
-		case <-starlarkCtx.ctx.Done():
-			return nil, starlarkCtx.ctx.Err()
-		case <-time.After(durMsg.AsDuration()):
-		}
-
-		return starlark.None, nil
 	})
 }

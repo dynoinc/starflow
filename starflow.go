@@ -95,3 +95,8 @@ func (e Event) AsReturnEvent() (ReturnEvent, bool) {
 	returnEvent, ok := e.Metadata.(ReturnEvent)
 	return returnEvent, ok
 }
+
+func (e Event) AsSleepEvent() (SleepEvent, bool) {
+	returnEvent, ok := e.Metadata.(SleepEvent)
+	return returnEvent, ok
+}
