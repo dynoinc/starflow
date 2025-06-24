@@ -267,7 +267,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			}); err != nil {
 				return starlark.None, fmt.Errorf("failed to record call event: %w", err)
 			}
-			t.run.NextEventID++
 		}
 
 		if len(t.events) > 0 {
@@ -340,7 +339,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		if err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run, event); err != nil {
 			return starlark.None, fmt.Errorf("failed to record return event: %w", err)
 		}
-		t.run.NextEventID++
 
 		return starlarkproto.MakeMessage(resp), nil
 	})

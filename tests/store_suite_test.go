@@ -41,14 +41,16 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
-		run, err := s.GetRun(ctx, id)
+		run1, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+		run2, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
 		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
-		err = s.RecordEvent(ctx, run, evt)
+		err = s.RecordEvent(ctx, run1, evt)
 		require.NoError(t, err)
 
-		err = s.RecordEvent(ctx, run, evt)
+		err = s.RecordEvent(ctx, run2, evt)
 		require.Error(t, err)
 		require.Equal(t, err, starflow.ErrConcurrentUpdate)
 	})

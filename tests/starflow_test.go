@@ -36,8 +36,8 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "hello"})
 	require.NoError(t, err)
 
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
-	worker.ProcessOnce(t.Context())
+	// Use the same worker instance that has the registered functions
+	wf.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := client.GetRun(t.Context(), runID)
@@ -104,9 +104,8 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "example"})
 	require.NoError(t, err)
 
-	// Step 6: Execute the workflow
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
-	worker.ProcessOnce(t.Context())
+	// Step 6: Execute the workflow using the same worker instance
+	wf.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := client.GetRun(t.Context(), runID)
@@ -212,8 +211,8 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "retry"})
 	require.NoError(t, err)
 
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
-	worker.ProcessOnce(t.Context())
+	// Use the same worker instance that has the registered functions
+	wf.ProcessOnce(t.Context())
 
 	require.Equal(t, 3, attempts)
 
