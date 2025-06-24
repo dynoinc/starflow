@@ -25,20 +25,20 @@ import (
 // ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
 var ErrYield = errors.New("workflow yielded")
 
-// YieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
-type YieldError struct {
+// yieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
+type yieldError struct {
 	cid string
 }
 
-func (y YieldError) Error() string { return ErrYield.Error() }
+func (y yieldError) Error() string { return ErrYield.Error() }
 
 // Is allows errors.Is(err, ErrYield) to work.
-func (y YieldError) Is(target error) bool {
+func (y yieldError) Is(target error) bool {
 	return target == ErrYield
 }
 
 // CorrelationID returns the associated correlation id.
-func (y YieldError) CorrelationID() string { return y.cid }
+func (y yieldError) CorrelationID() string { return y.cid }
 
 // Yield creates a new correlation id and returns an error sentinel that callers can return
 // from their registered function to pause the workflow.
@@ -48,7 +48,7 @@ func (y YieldError) CorrelationID() string { return y.cid }
 //	return nil, err
 func Yield() (string, error) {
 	cid := shortuuid.New()
-	return cid, YieldError{cid: cid}
+	return cid, yieldError{cid: cid}
 }
 
 type registeredFn struct {
@@ -580,8 +580,8 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 
 		wake := time.Now().Add(time.Duration(durMs) * time.Millisecond)
 
-		// get correlation id via helper
-		cid := shortuuid.New()
+		// create yield error and get cid
+		cid, yerr := Yield()
 
 		// Persist yield event
 		if recErr := w.store.RecordEvent(runID, &Event{
@@ -601,8 +601,6 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 			return nil, err
 		}
 
-		// Return yield error
-		yerr := YieldError{cid: cid}
 		return nil, yerr
 	})
 }
