@@ -428,8 +428,11 @@ func TestWorkflow_YieldError(t *testing.T) {
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
+	var called int
 	var cid string
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+		called++
+
 		var err error
 		cid, err = starflow.NewYieldError()
 		return nil, err
@@ -450,6 +453,7 @@ def main(ctx, input):
 	require.NoError(t, err)
 
 	wf.ProcessOnce(t.Context())
+	require.Equal(t, 1, called)
 
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
@@ -466,6 +470,8 @@ def main(ctx, input):
 	require.Equal(t, starflow.RunStatusPending, run.Status)
 
 	wf.ProcessOnce(t.Context())
+	require.Equal(t, 1, called)
+
 	run, err = client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
