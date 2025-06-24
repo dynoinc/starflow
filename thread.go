@@ -192,7 +192,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to marshal output: %w", err)
 	}
 
-	if err := t.w.store.UpdateRunOutput(ctx, t.run.ID, outputBytes); err != nil {
+	if err := t.w.store.UpdateRun(ctx, t.run.ID, outputBytes, nil); err != nil {
 		return zero, fmt.Errorf("failed to update run output: %w", err)
 	}
 

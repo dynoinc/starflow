@@ -12,35 +12,23 @@ var ErrConcurrentUpdate = errors.New("concurrent update")
 // Store is the interface for persisting workflow data.
 type Store interface {
 	// Scripts
-	// SaveScript persists the Starlark script content.
-	// It returns the sha256 hash of the content, which is used as the script ID.
+	//
+	// Methods to save/restore scripts. Saving same script twice succeeds and returns the same hash.
 	SaveScript(ctx context.Context, content []byte) (string, error)
-
-	// GetScript retrieves a script by its sha256 hash.
 	GetScript(ctx context.Context, scriptHash string) ([]byte, error)
 
 	// Runs
-	// CreateRun creates a new run record for a given script.
+	//
+	// Methods to create/introspect/claim runs.
 	CreateRun(ctx context.Context, scriptHash string, input []byte) (string, error)
-
-	// GetRun retrieves the details of a specific run.
 	GetRun(ctx context.Context, runID string) (*Run, error)
-
-	// ListRuns returns all runs whose status matches any of the supplied states.
+	UpdateRun(ctx context.Context, runID string, output []byte, err error) error
 	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
-
-	// ClaimRun attempts to mark a run as RUNNING with worker id and lease. Returns true if successful.
 	ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error)
 
 	// Events
+	//
+	// Methods to record events.
 	RecordEvent(ctx context.Context, run *Run, event *Event) error
-
-	// GetEvents retrieves all events for a specific run, ordered by time.
 	GetEvents(ctx context.Context, runID string) ([]*Event, error)
-
-	// UpdateRunOutput updates the output of a run and typically sets status to COMPLETED.
-	UpdateRunOutput(ctx context.Context, runID string, output []byte) error
-
-	// UpdateRunError sets the error message for a run.
-	UpdateRunError(ctx context.Context, runID string, errMsg string) error
 }

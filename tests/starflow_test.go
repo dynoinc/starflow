@@ -57,12 +57,9 @@ def main(ctx, input):
 	require.Equal(t, "pong: hello", outputResp.Message)
 }
 
-// TestWorkflowLibraryUsage demonstrates how to use the starflow library.
-func TestWorkflowLibraryUsage(t *testing.T) {
-	// Step 1: Create a temporary database for workflow storage
+func TestWorkflow_ReplaySupport(t *testing.T) {
 	store := NewMemoryStore(t)
 
-	// Step 3: Create the workflow and register functions
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
 	httpCallFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -75,7 +72,6 @@ func TestWorkflowLibraryUsage(t *testing.T) {
 	starflow.Register(wf, httpCallFn, starflow.WithName("httpCallFn"))
 	starflow.Register(wf, dbQueryFn, starflow.WithName("dbQueryFn"))
 
-	// Step 4: Define your Starlark workflow script
 	script := `
 load("proto", "proto")
 
@@ -99,12 +95,10 @@ def main(ctx, input):
 	return ping_proto.PingResponse(message="Completed: " + http_resp.message + " + " + db_resp.message)
 `
 
-	// Step 5: Run the workflow
 	client := starflow.NewClient[*testpb.PingRequest](store)
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "example"})
 	require.NoError(t, err)
 
-	// Step 6: Execute the workflow using the same worker instance
 	wf.ProcessOnce(t.Context())
 
 	// Fetch run output
@@ -116,18 +110,14 @@ def main(ctx, input):
 	expectedMessage := "Completed: HTTP response simulated + DB result for: db_example"
 	require.Equal(t, expectedMessage, outputResp.Message)
 
-	// Step 7: Verify the workflow completed successfully
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
-	// Step 8: Check that all function calls were recorded
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
 	require.NoError(t, err)
 
-	// Should have 4 events: 2 calls + 2 returns
 	require.Equal(t, 4, len(events))
 
-	// Verify the events are for our functions
 	expectedFunctions := []string{"httpCallFn", "httpCallFn", "dbQueryFn", "dbQueryFn"}
 	expectedTypes := []starflow.EventType{
 		starflow.EventTypeCall, starflow.EventTypeReturn,
@@ -243,4 +233,60 @@ def main(ctx, input):
 
 	run, _ := client.GetRun(t.Context(), runID)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+}
+
+func TestWorkflow_Failure(t *testing.T) {
+	store := NewMemoryStore(t)
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+
+	// Register a function that always fails
+	failingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+		return nil, fmt.Errorf("intentional failure: %s", req.Message)
+	}
+	starflow.Register(wf, failingFn, starflow.WithName("failingFn"))
+
+	script := `
+load("proto", "proto")
+
+def main(ctx, input):
+	ping_proto = proto.file("ping.proto")
+	# This call will fail
+	result = failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return result
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "should fail"})
+	require.NoError(t, err)
+
+	// Process the workflow
+	wf.ProcessOnce(t.Context())
+
+	// Fetch run output and verify it failed
+	run, err := client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusFailed, run.Status)
+	require.NotEmpty(t, run.Error)
+	require.Contains(t, run.Error, "intentional failure: should fail")
+
+	// Verify events show the failure
+	events, err := client.GetEvents(t.Context(), runID)
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+
+	// First event should be the function call
+	require.Equal(t, starflow.EventTypeCall, events[0].Type)
+	require.Equal(t, "failingFn", events[0].FunctionName)
+
+	// Second event should be the return with error
+	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
+	require.Equal(t, "failingFn", events[1].FunctionName)
+	require.NotEmpty(t, events[1].Error)
+	require.Contains(t, events[1].Error, "intentional failure: should fail")
+
+	t.Log("✅ Workflow failure correctly detected!")
+	t.Logf("Run ID: %s", runID)
+	t.Logf("Status: %s", run.Status)
+	t.Logf("Error: %s", run.Error)
 }

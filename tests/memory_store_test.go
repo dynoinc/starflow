@@ -181,7 +181,7 @@ func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.
 }
 
 // UpdateRunOutput updates the output of a run and typically sets status to COMPLETED.
-func (s *MemoryStore) UpdateRunOutput(ctx context.Context, runID string, output []byte) error {
+func (s *MemoryStore) UpdateRun(ctx context.Context, runID string, output []byte, err error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -190,8 +190,14 @@ func (s *MemoryStore) UpdateRunOutput(ctx context.Context, runID string, output 
 		return fmt.Errorf("run with ID %s not found", runID)
 	}
 
-	run.Output = output
-	run.Status = starflow.RunStatusCompleted
+	if err != nil {
+		run.Error = err.Error()
+		run.Status = starflow.RunStatusFailed
+	} else {
+		run.Output = output
+		run.Status = starflow.RunStatusCompleted
+	}
+
 	run.UpdatedAt = time.Now()
 
 	return nil
