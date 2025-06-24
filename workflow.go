@@ -294,7 +294,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	globals, err := w.buildGlobals(runID, eventHistory)
 	if err != nil {
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to build globals: %v", err))
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to build globals: %w", err)
 	}
 
@@ -307,21 +306,18 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 			return zero, nil
 		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
 
 	mainVal, ok := globalsAfterExec["main"]
 	if !ok {
 		_ = w.store.UpdateRunError(ctx, runID, "starlark script must have a main function")
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("starlark script must have a main function")
 	}
 
 	mainFn, ok := mainVal.(starlark.Callable)
 	if !ok {
 		_ = w.store.UpdateRunError(ctx, runID, "main must be a function")
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("main must be a function")
 	}
 
@@ -337,7 +333,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 			return zero, nil
 		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("error calling main function: %v", err))
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
 
@@ -346,7 +341,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 		pm, ok := starlarkOutput.(*starlarkproto.Message)
 		if !ok {
 			_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("main return value is not a proto message, got %s", starlarkOutput.Type()))
-			w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 			return zero, fmt.Errorf("main return value is not a proto message, got %s", starlarkOutput.Type())
 		}
 		proto.Merge(output, pm.ProtoReflect().Interface())
@@ -355,18 +349,12 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	outputBytes, err := proto.Marshal(output)
 	if err != nil {
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to marshal output: %v", err))
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to marshal output: %w", err)
 	}
 
 	if err := w.store.UpdateRunOutput(ctx, runID, outputBytes); err != nil {
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to update run output: %v", err))
-		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to update run output: %w", err)
-	}
-
-	if err := w.store.UpdateRunStatus(ctx, runID, RunStatusCompleted); err != nil {
-		return zero, fmt.Errorf("failed to update run status: %w", err)
 	}
 
 	return output, nil

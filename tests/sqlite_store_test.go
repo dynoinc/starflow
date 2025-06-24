@@ -185,13 +185,8 @@ func (s *SQLiteStore) GetEvents(runID string) ([]*starflow.Event, error) {
 	return events, nil
 }
 
-func (s *SQLiteStore) UpdateRunStatus(ctx context.Context, runID string, status starflow.RunStatus) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", status, time.Now(), runID)
-	return err
-}
-
 func (s *SQLiteStore) UpdateRunOutput(ctx context.Context, runID string, output []byte) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE runs SET output = ?, updated_at = ? WHERE id = ?", output, time.Now(), runID)
+	_, err := s.db.ExecContext(ctx, "UPDATE runs SET output = ?, status = ?, updated_at = ? WHERE id = ?", output, starflow.RunStatusCompleted, time.Now(), runID)
 	if err != nil {
 		return fmt.Errorf("failed to update run output: %w", err)
 	}
@@ -330,6 +325,6 @@ func (s *SQLiteStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID s
 
 // UpdateRunError sets the error message for a run.
 func (s *SQLiteStore) UpdateRunError(ctx context.Context, runID string, errMsg string) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE runs SET error = ?, updated_at = ? WHERE id = ?", errMsg, time.Now(), runID)
+	_, err := s.db.ExecContext(ctx, "UPDATE runs SET error = ?, status = ?, updated_at = ? WHERE id = ?", errMsg, starflow.RunStatusFailed, time.Now(), runID)
 	return err
 }

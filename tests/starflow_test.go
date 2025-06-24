@@ -153,7 +153,7 @@ def main(ctx, input):
 	// --- Second run: Resumes and succeeds ---
 	bakingShouldFail = false
 
-	if err := store.UpdateRunStatus(context.Background(), runID, starflow.RunStatusPending); err != nil {
+	if err := store.UpdateRunStatusAndRecordEvent(context.Background(), runID, starflow.RunStatusPending, nil, nil); err != nil {
 		t.Fatalf("failed to reset status: %v", err)
 	}
 

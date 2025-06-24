@@ -26,10 +26,7 @@ type Store interface {
 	// GetEvents retrieves all events for a specific run, ordered by time.
 	GetEvents(runID string) ([]*Event, error)
 
-	// UpdateRunStatus updates the status of a run.
-	UpdateRunStatus(ctx context.Context, runID string, status RunStatus) error
-
-	// UpdateRunOutput updates the output of a run.
+	// UpdateRunOutput updates the output of a run and typically sets status to COMPLETED.
 	UpdateRunOutput(ctx context.Context, runID string, output []byte) error
 
 	// UpdateRunError sets the error message for a run.
