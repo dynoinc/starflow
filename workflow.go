@@ -24,23 +24,12 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-// ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
-var ErrYield = errors.New("workflow yielded")
-
 // yieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
 type yieldError struct {
 	cid string
 }
 
-func (y yieldError) Error() string { return ErrYield.Error() }
-
-// Is allows errors.Is(err, ErrYield) to work.
-func (y yieldError) Is(target error) bool {
-	return target == ErrYield
-}
-
-// CorrelationID returns the associated correlation id.
-func (y yieldError) CorrelationID() string { return y.cid }
+func (y yieldError) Error() string { return "workflow yielded" }
 
 // Yield creates a new correlation id and returns an error sentinel that callers can return
 // from their registered function to pause the workflow.
@@ -302,7 +291,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// but the wrapped functions will short-circuit and return recorded values.
 	globalsAfterExec, err := starlark.ExecFile(thread, "script", script, globals)
 	if err != nil {
-		if errors.Is(err, ErrYield) {
+		if errors.Is(err, yieldError{}) {
 			return zero, nil // expected pause
 		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
@@ -328,7 +317,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	// Call main with context and input
 	starlarkOutput, err := starlark.Call(thread, mainFn, starlark.Tuple{starlarkCtx, starlarkInput}, nil)
 	if err != nil {
-		if errors.Is(err, ErrYield) {
+		if errors.Is(err, yieldError{}) {
 			// already set to waiting inside yielding function
 			return zero, nil
 		}
@@ -418,13 +407,13 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		var ctxVal starlark.Value
 		var reqVal starlark.Value
 		if err := starlark.UnpackArgs(name, args, kwargs, "ctx", &ctxVal, "req", &reqVal); err != nil {
-			return nil, err
+			return starlark.None, err
 		}
 
 		// Extract context from starlark value
 		starlarkCtx, ok := ctxVal.(*starlarkContext)
 		if !ok {
-			return nil, fmt.Errorf("first argument must be context, got %s", ctxVal.Type())
+			return starlark.None, fmt.Errorf("first argument must be context, got %s", ctxVal.Type())
 		}
 
 		ctx, span := w.tracer.Start(starlarkCtx.ctx, name)
@@ -434,20 +423,20 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		if reqVal != starlark.None {
 			pm, ok := reqVal.(*starlarkproto.Message)
 			if !ok {
-				return nil, fmt.Errorf("failed to convert starlark value to proto: expected proto message, got %s", reqVal.Type())
+				return starlark.None, fmt.Errorf("failed to convert starlark value to proto: expected proto message, got %s", reqVal.Type())
 			}
 			proto.Merge(req, pm.ProtoReflect().Interface())
 		}
 
 		inputBytes, err := proto.Marshal(req)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal call input: %w", err)
+			return starlark.None, fmt.Errorf("failed to marshal call input: %w", err)
 		}
 
 		// Get current run state to get NextEventID
 		run, err := w.store.GetRun(runID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get run state: %w", err)
+			return starlark.None, fmt.Errorf("failed to get run state: %w", err)
 		}
 
 		if err := w.store.RecordEvent(runID, run.NextEventID, &Event{
@@ -456,7 +445,7 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			FunctionName: name,
 			Input:        inputBytes,
 		}); err != nil {
-			return nil, fmt.Errorf("failed to record call event: %w", err)
+			return starlark.None, fmt.Errorf("failed to record call event: %w", err)
 		}
 
 		var resp proto.Message
@@ -466,7 +455,7 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			resp, innerErr = regFn.fn(ctx, req)
 
 			// Do not retry on ErrYield
-			if errors.Is(innerErr, ErrYield) {
+			if errors.Is(innerErr, yieldError{}) {
 				return backoff.Permanent(innerErr)
 			}
 			return innerErr
@@ -480,25 +469,28 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		}
 
 		// Handle yield sentinel separately
-		var yerr interface{ CorrelationID() string }
-		if errors.As(err, &yerr) {
-			cid := yerr.CorrelationID()
+		var yieldErr yieldError
+		if errors.As(err, &yieldErr) {
+			cid := yieldErr.cid
 			evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: name, CorrelationID: cid, Input: inputBytes}
 			// Get updated run state for NextEventID
 			run, err := w.store.GetRun(runID)
 			if err != nil {
-				return nil, fmt.Errorf("failed to get run state: %w", err)
+				return starlark.None, fmt.Errorf("failed to get run state: %w", err)
 			}
-			if recErr := w.store.UpdateRunStatusAndRecordEvent(ctx, runID, run.NextEventID, RunStatusWaiting, evt, nil); recErr != nil {
-				return nil, recErr
+			if recErr := w.store.RecordEventAndUpdateStatus(ctx, runID, run.NextEventID, evt, RunStatusWaiting, nil); recErr != nil {
+				return starlark.None, recErr
 			}
-			return nil, err
+			return starlark.None, err
 		}
 
 		// Marshal response if present
 		var outputBytes []byte
 		if resp != nil {
-			outputBytes, _ = proto.Marshal(resp)
+			outputBytes, err = proto.Marshal(resp)
+			if err != nil {
+				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
+			}
 		}
 
 		event := &Event{
@@ -513,10 +505,10 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		// Get updated run state for NextEventID
 		run, err = w.store.GetRun(runID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get run state: %w", err)
+			return starlark.None, fmt.Errorf("failed to get run state: %w", err)
 		}
 		if recordErr := w.store.RecordEvent(runID, run.NextEventID, event); recordErr != nil {
-			return nil, fmt.Errorf("failed to record return event: %w", recordErr)
+			return starlark.None, fmt.Errorf("failed to record return event: %w", recordErr)
 		}
 
 		return starlarkproto.MakeMessage(resp), nil
@@ -569,7 +561,7 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 
 		// Persist yield event and status/wake
 		evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: "time.sleep", CorrelationID: cid}
-		if recErr := w.store.UpdateRunStatusAndRecordEvent(starlarkCtx.ctx, runID, run.NextEventID, RunStatusWaiting, evt, &wake); recErr != nil {
+		if recErr := w.store.RecordEventAndUpdateStatus(starlarkCtx.ctx, runID, run.NextEventID, evt, RunStatusWaiting, &wake); recErr != nil {
 			return nil, recErr
 		}
 
@@ -599,6 +591,6 @@ func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID stri
 		return fmt.Errorf("failed to get run state: %w", err)
 	}
 
-	evt := &Event{Timestamp: time.Now(), Type: EventTypeReturn, FunctionName: yieldEvent.FunctionName, CorrelationID: correlationID, Output: outputBytes}
-	return w.store.UpdateRunStatusAndRecordEvent(ctx, runID, run.NextEventID, RunStatusPending, evt, nil)
+	evt := &Event{Timestamp: time.Now(), Type: EventTypeResume, FunctionName: yieldEvent.FunctionName, CorrelationID: correlationID, Output: outputBytes}
+	return w.store.RecordEventAndUpdateStatus(ctx, runID, run.NextEventID, evt, RunStatusPending, nil)
 }

@@ -2,8 +2,12 @@ package starflow
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrConcurrentUpdate indicates optimistic concurrency failure.
+var ErrConcurrentUpdate = errors.New("concurrent update")
 
 // Store is the interface for persisting workflow data.
 type Store interface {
@@ -33,6 +37,12 @@ type Store interface {
 	// On success the store increments NextEventID by one.
 	RecordEvent(runID string, expectedNextID int, event *Event) error
 
+	// RecordEventAndUpdateStatus performs the following atomically in a single transaction:
+	//   1. Record the supplied event
+	//   2. Update the run's status to the supplied value
+	//   3. Update wake_at timestamp (may be nil to clear)
+	RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *Event, status RunStatus, wakeAt *time.Time) error
+
 	// GetEvents retrieves all events for a specific run, ordered by time.
 	GetEvents(runID string) ([]*Event, error)
 
@@ -45,10 +55,4 @@ type Store interface {
 	// FindEventByCorrelationID retrieves the first event with the given correlationID across all runs.
 	// It returns the associated runID together with the event.
 	FindEventByCorrelationID(correlationID string) (string, *Event, error)
-
-	// UpdateRunStatusAndRecordEvent performs the following atomically in a single transaction:
-	//   1. Insert the supplied event (if not nil)
-	//   2. Update the run's status to the supplied value (if status != "")
-	//   3. Update wake_at timestamp (may be nil to clear)
-	UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, expectedNextID int, status RunStatus, event *Event, wakeAt *time.Time) error
 }

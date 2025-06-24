@@ -231,11 +231,11 @@ func (s *MemoryStore) FindEventByCorrelationID(correlationID string) (string, *s
 	return "", nil, fmt.Errorf("event with correlation ID %s not found", correlationID)
 }
 
-// UpdateRunStatusAndRecordEvent performs the following atomically in a single transaction:
+// RecordEventAndUpdateStatus performs the following atomically in a single transaction:
 //  1. Insert the supplied event (if not nil)
 //  2. Update the run's status to the supplied value (if status != "")
 //  3. Update wake_at timestamp (may be nil to clear)
-func (s *MemoryStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, expectedNextID int, status starflow.RunStatus, event *starflow.Event, wakeAt *time.Time) error {
+func (s *MemoryStore) RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *starflow.Event, status starflow.RunStatus, wakeAt *time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

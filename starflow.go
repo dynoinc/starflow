@@ -1,7 +1,6 @@
 package starflow
 
 import (
-	"errors"
 	"time"
 )
 
@@ -23,18 +22,27 @@ const (
 
 // Run represents a single execution of a workflow.
 type Run struct {
-	ID          string
-	ScriptHash  string
+	// Fixed on creation
+	ID         string
+	ScriptHash string
+	Input      []byte
+	CreatedAt  time.Time
+
+	// Updated at each event
 	Status      RunStatus
-	Input       []byte
-	Output      []byte
 	NextEventID int
-	WorkerID    string
-	LeaseUntil  *time.Time
-	Error       string
-	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	WakeAt      *time.Time
+
+	// Set when finished.
+	Output []byte
+	Error  string
+
+	// Set when claimed by a worker
+	WorkerID   string
+	LeaseUntil *time.Time
+
+	// Set when waiting for a timeout to expire
+	WakeAt *time.Time
 }
 
 // EventType represents the type of an event in the execution history.
@@ -47,6 +55,8 @@ const (
 	EventTypeReturn EventType = "RETURN"
 	// EventTypeYield indicates that the function yielded execution and is waiting for an external signal.
 	EventTypeYield EventType = "YIELD"
+	// EventTypeResume indicates that the function resumed execution after being yielded.
+	EventTypeResume EventType = "RESUME"
 )
 
 // Event represents a single event in the execution history of a run.
@@ -59,6 +69,3 @@ type Event struct {
 	Error         string
 	CorrelationID string
 }
-
-// ErrConcurrentUpdate indicates optimistic concurrency failure.
-var ErrConcurrentUpdate = errors.New("concurrent update")

@@ -36,7 +36,7 @@ def main(ctx, input):
 	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
@@ -78,20 +78,31 @@ func TestWorkflow_Resume(t *testing.T) {
 
 	bakingFnFails := func(ctx context.Context, req *testpb.BakePizzaRequest) (*testpb.BakePizzaResponse, error) {
 		if bakingShouldFail {
-			return nil, fmt.Errorf("oven is on fire")
+			return &testpb.BakePizzaResponse{Success: false}, nil
 		}
+
 		return &testpb.BakePizzaResponse{Success: true}, nil
+	}
+
+	var cid string
+	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingRequest, error) {
+		var err error
+		cid, err = starflow.Yield()
+		fmt.Println("yielding", cid, err)
+		return nil, err
 	}
 
 	wf1 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
 	starflow.Register(wf1, paymentFn, starflow.WithName("paymentFn"))
 	starflow.Register(wf1, bakingFnFails, starflow.WithName("bakingFnFails"))
+	starflow.Register(wf1, yieldFn, starflow.WithName("yieldFn"))
 
 	script := `
 load("proto", "proto")
 
 def main(ctx, input):
 	print("workflow input:", input)
+	ping_proto = proto.file("ping.proto")
 	pizza_proto = proto.file("pizza.proto")
 	payment_req = pizza_proto.ProcessPaymentRequest(credit_card_number=input.credit_card_number, amount=1500)
 	payment_res = paymentFn(ctx=ctx, req=payment_req)
@@ -101,7 +112,13 @@ def main(ctx, input):
 
 	bake_req = pizza_proto.BakePizzaRequest(pizza_type=input.pizza_type, quantity=input.quantity)
 	bake_res = bakingFnFails(ctx=ctx, req=bake_req)
+	print("bake_res:", bake_res)
 
+	if not bake_res.success:
+		print("yielding")
+		yieldFn(ctx=ctx, req=ping_proto.PingRequest(message="oven_on_fire"))
+
+	bake_res = bakingFnFails(ctx=ctx, req=bake_req)
 	if not bake_res.success:
 		return pizza_proto.OrderPizzaResponse(status="BAKING_FAILED")
 
@@ -115,47 +132,38 @@ def main(ctx, input):
 
 	require.NoError(t, err)
 
-	// Try to execute - this should fail
+	// Try to execute - this should yield
 	worker1 := wf1.NewWorker(0)
-	worker1.ProcessOnce(context.Background())
+	worker1.ProcessOnce(t.Context())
+
+	fmt.Println("events:")
+	events, err := store.GetEvents(runID)
+	require.NoError(t, err)
+	for _, e := range events {
+		fmt.Printf("%+v\n", *e)
+	}
 
 	run, err := store.GetRun(runID)
 	require.NoError(t, err)
-	require.Equal(t, starflow.RunStatusFailed, run.Status)
+	require.Equal(t, starflow.RunStatusWaiting, run.Status, run.Error)
 
 	// --- Second run: Resumes and succeeds ---
 	bakingShouldFail = false
 
-	// Get current run state to get NextEventID
-	run, err = store.GetRun(runID)
-	require.NoError(t, err)
-	require.NoError(t, store.UpdateRunStatusAndRecordEvent(context.Background(), runID, run.NextEventID, starflow.RunStatusPending, nil, nil))
+	// Send signal to resume with flag flipped
+	require.NoError(t, wf1.Signal(t.Context(), cid, &testpb.BakePizzaResponse{Success: true}))
 
-	wf2 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
-	starflow.Register(wf2, paymentFn, starflow.WithName("paymentFn"))
-	starflow.Register(wf2, bakingFnFails, starflow.WithName("bakingFnFails"))
-
-	worker2 := wf2.NewWorker(0)
-	worker2.ProcessOnce(context.Background())
+	// Process again – should complete
+	worker1.ProcessOnce(t.Context())
 
 	run, err = store.GetRun(runID)
 	require.NoError(t, err)
-
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	var outResp testpb.OrderPizzaResponse
 	require.NoError(t, proto.Unmarshal(run.Output, &outResp))
 
 	require.Equal(t, "ORDER_COMPLETE", outResp.Status)
-
-	events, err := store.GetEvents(runID)
-	require.NoError(t, err)
-	require.Len(t, events, 6)
-
-	fmt.Println("events:")
-	for _, e := range events {
-		fmt.Printf("%+v\n", *e)
-	}
 }
 
 // TestWorkflowLibraryUsage demonstrates how to use the starflow library.
@@ -206,7 +214,7 @@ def main(ctx, input):
 
 	// Step 6: Execute the workflow
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
@@ -276,7 +284,7 @@ def main(ctx, input):
 	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
@@ -316,7 +324,7 @@ def main(ctx, input):
 	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	require.Equal(t, 3, attempts)
 
@@ -344,14 +352,14 @@ def main(ctx, input):
 	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background()) // should yield
+	worker.ProcessOnce(t.Context()) // should yield
 
 	run, _ := store.GetRun(runID)
 	require.Equal(t, starflow.RunStatusWaiting, run.Status)
 
 	time.Sleep(50 * time.Millisecond)
 
-	worker.ProcessOnce(context.Background()) // should complete
+	worker.ProcessOnce(t.Context()) // should complete
 
 	run, _ = store.GetRun(runID)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
@@ -382,7 +390,7 @@ def main(ctx, input):
 
 	worker := wf.NewWorker(0)
 	// First processing – should hit yield
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	// Verify status WAITING
 	run, err := store.GetRun(runID)
@@ -404,10 +412,10 @@ def main(ctx, input):
 	require.NotEmpty(t, cid, "correlation id not found")
 
 	// Send signal
-	require.NoError(t, wf.Signal(context.Background(), cid, &testpb.PingResponse{Message: "done"}))
+	require.NoError(t, wf.Signal(t.Context(), cid, &testpb.PingResponse{Message: "done"}))
 
 	// Process again – should complete
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(t.Context())
 
 	run, err = store.GetRun(runID)
 	require.NoError(t, err)
