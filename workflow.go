@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"runtime"
 	"strings"
@@ -70,7 +71,6 @@ func WithName(name string) Option {
 }
 
 // WithRetryPolicy specifies a retry policy for the function.
-// Provide an implementation from the backoff/v4 package, e.g. backoff.NewExponentialBackOff().
 func WithRetryPolicy(b backoff.BackOff) Option {
 	return func(rf *registeredFn) {
 		rf.retryPolicy = b
@@ -276,9 +276,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 			}
 			if module == "time" {
 				members := make(starlark.StringDict)
-				for k, v := range starlarktime.Module.Members {
-					members[k] = v
-				}
+				maps.Copy(members, starlarktime.Module.Members)
 				members["sleep"] = w.makeSleepBuiltin(runID)
 				return members, nil
 			}
@@ -295,6 +293,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	eventHistory := w.buildEventHistory(resumeEvents)
 	globals, err := w.buildGlobals(runID, eventHistory)
 	if err != nil {
+		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to build globals: %v", err))
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to build globals: %w", err)
 	}
@@ -307,18 +306,21 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 			// Yield is an expected pause, status already set to WAITING in wrapFn.
 			return zero, nil
 		}
+		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
 
 	mainVal, ok := globalsAfterExec["main"]
 	if !ok {
+		_ = w.store.UpdateRunError(ctx, runID, "starlark script must have a main function")
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("starlark script must have a main function")
 	}
 
 	mainFn, ok := mainVal.(starlark.Callable)
 	if !ok {
+		_ = w.store.UpdateRunError(ctx, runID, "main must be a function")
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("main must be a function")
 	}
@@ -334,6 +336,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 			// already set to waiting inside yielding function
 			return zero, nil
 		}
+		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("error calling main function: %v", err))
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
@@ -342,6 +345,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	if starlarkOutput != starlark.None {
 		pm, ok := starlarkOutput.(*starlarkproto.Message)
 		if !ok {
+			_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("main return value is not a proto message, got %s", starlarkOutput.Type()))
 			w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 			return zero, fmt.Errorf("main return value is not a proto message, got %s", starlarkOutput.Type())
 		}
@@ -350,11 +354,13 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 
 	outputBytes, err := proto.Marshal(output)
 	if err != nil {
+		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to marshal output: %v", err))
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to marshal output: %w", err)
 	}
 
 	if err := w.store.UpdateRunOutput(ctx, runID, outputBytes); err != nil {
+		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("failed to update run output: %v", err))
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to update run output: %w", err)
 	}
@@ -377,63 +383,48 @@ func (sc *starlarkContext) Freeze()               {}
 func (sc *starlarkContext) Truth() starlark.Bool  { return starlark.True }
 func (sc *starlarkContext) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: context") }
 
-func (w *Workflow[Input, Output]) buildEventHistory(events []*Event) map[string]*Event {
-	history := make(map[string]*Event)
-	if events == nil {
-		return history
-	}
-	// This is simplified. A real implementation needs to handle multiple calls to the same function.
-	// We'll use the function name as the key for now.
+func (w *Workflow[Input, Output]) buildEventHistory(events []*Event) map[string][]*Event {
+	history := make(map[string][]*Event)
 	for _, e := range events {
 		if e.Type == EventTypeReturn {
-			// Convert byte events to proto events for workflow execution
-			protoEvent := &Event{
-				Timestamp:    e.Timestamp,
-				Type:         e.Type,
-				FunctionName: e.FunctionName,
-				Error:        e.Error,
-			}
-
-			// Unmarshal output if we have the type and it's not an error
-			if e.Error == "" {
-				if resType, ok := w.types[e.FunctionName+"_response"]; ok && len(e.Output) > 0 {
-					res := proto.Clone(resType)
-					if err := proto.Unmarshal(e.Output, res); err == nil {
-						protoEvent.Output = e.Output // Keep as bytes but unmarshaled for use
-					}
-				}
-			}
-
-			history[e.FunctionName] = protoEvent
+			history[e.FunctionName] = append(history[e.FunctionName], e)
 		}
 	}
 	return history
 }
 
-func (w *Workflow[Input, Output]) buildGlobals(runID string, history map[string]*Event) (starlark.StringDict, error) {
+func (w *Workflow[Input, Output]) buildGlobals(runID string, history map[string][]*Event) (starlark.StringDict, error) {
 	globals := make(starlark.StringDict)
 	for name, regFn := range w.registry {
-		var historicalEvent *Event
+		var hist []*Event
 		if history != nil {
-			historicalEvent = history[name]
+			hist = history[name]
 		}
-		globals[name] = w.wrapFn(runID, name, regFn, historicalEvent)
+		globals[name] = w.wrapFn(runID, name, regFn, hist)
 	}
 	return globals, nil
 }
 
-func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn registeredFn, history *Event) *starlark.Builtin {
+func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn registeredFn, history []*Event) *starlark.Builtin {
+	// Maintain a cursor into the slice so subsequent calls replay sequential events.
+	idx := 0
+
 	return starlark.NewBuiltin(name, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
-		if history != nil && history.Error == "" {
-			// Successful event in history, short-circuit and return the recorded value.
-			if len(history.Output) > 0 {
-				if resType, ok := w.types[name+"_response"]; ok {
-					res := proto.Clone(resType)
-					if err := proto.Unmarshal(history.Output, res); err == nil {
-						return starlarkproto.MakeMessage(res), nil
+		// If we have historical events remaining and the recorded event succeeded, short-circuit.
+		if idx < len(history) {
+			evt := history[idx]
+			idx++
+			if evt.Error == "" {
+				if len(evt.Output) > 0 {
+					if resType, ok := w.types[name+"_response"]; ok {
+						res := proto.Clone(resType)
+						if err := proto.Unmarshal(evt.Output, res); err == nil {
+							return starlarkproto.MakeMessage(res), nil
+						}
 					}
 				}
 			}
+			// If the historical event recorded an error we will fall through and invoke the function again.
 		}
 
 		var ctxVal starlark.Value

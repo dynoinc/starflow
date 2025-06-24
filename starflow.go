@@ -27,6 +27,7 @@ type Run struct {
 	Status     RunStatus
 	Input      []byte
 	Output     []byte
+	Error      string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	WakeAt     *time.Time

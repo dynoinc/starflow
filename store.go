@@ -32,6 +32,9 @@ type Store interface {
 	// UpdateRunOutput updates the output of a run.
 	UpdateRunOutput(ctx context.Context, runID string, output []byte) error
 
+	// UpdateRunError sets the error message for a run.
+	UpdateRunError(ctx context.Context, runID string, errMsg string) error
+
 	// ListRuns returns all runs whose status matches any of the supplied states.
 	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
 

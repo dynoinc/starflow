@@ -47,6 +47,7 @@ func (s *SQLiteStore) init() error {
 		input BLOB,
 		status TEXT NOT NULL,
 		output BLOB,
+		error TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		wake_at DATETIME,
@@ -102,8 +103,8 @@ func (s *SQLiteStore) CreateRun(scriptHash string, input []byte) (string, error)
 	now := time.Now()
 
 	_, err := s.db.Exec(
-		"INSERT INTO runs (id, script_hash, input, status, created_at, updated_at, wake_at) VALUES (?, ?, ?, ?, ?, ?, ?) ",
-		runID, scriptHash, input, starflow.RunStatusPending, now, now, nil,
+		"INSERT INTO runs (id, script_hash, input, status, output, error, created_at, updated_at, wake_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+		runID, scriptHash, input, starflow.RunStatusPending, nil, nil, now, now, nil,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
@@ -117,11 +118,12 @@ func (s *SQLiteStore) GetRun(runID string) (*starflow.Run, error) {
 	var run starflow.Run
 	var inputBytes, outputBytes []byte
 	var status string
+	var errStr sql.NullString
 	var wakeAt sql.NullTime
 	err := s.db.QueryRow(
-		"SELECT id, script_hash, status, input, output, created_at, updated_at, wake_at FROM runs WHERE id = ?",
+		"SELECT id, script_hash, status, error, input, output, created_at, updated_at, wake_at FROM runs WHERE id = ?",
 		runID,
-	).Scan(&run.ID, &run.ScriptHash, &status, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt, &wakeAt)
+	).Scan(&run.ID, &run.ScriptHash, &status, &errStr, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt, &wakeAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run with ID %s not found", runID)
@@ -129,6 +131,9 @@ func (s *SQLiteStore) GetRun(runID string) (*starflow.Run, error) {
 		return nil, fmt.Errorf("failed to get run: %w", err)
 	}
 	run.Status = starflow.RunStatus(status)
+	if errStr.Valid {
+		run.Error = errStr.String
+	}
 	run.Input = inputBytes
 	run.Output = outputBytes
 	if wakeAt.Valid {
@@ -207,7 +212,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 		args[i] = st
 	}
 
-	query := fmt.Sprintf(`SELECT id, script_hash, status, input, output, created_at, updated_at, wake_at
+	query := fmt.Sprintf(`SELECT id, script_hash, status, error, input, output, created_at, updated_at, wake_at
 		FROM runs WHERE status IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -220,11 +225,15 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 	for rows.Next() {
 		var run starflow.Run
 		var status string
+		var errStr sql.NullString
 		var wakeAt sql.NullTime
-		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt, &wakeAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &errStr, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt, &wakeAt); err != nil {
 			return nil, err
 		}
 		run.Status = starflow.RunStatus(status)
+		if errStr.Valid {
+			run.Error = errStr.String
+		}
 		if wakeAt.Valid {
 			run.WakeAt = &wakeAt.Time
 		}
@@ -317,4 +326,10 @@ func (s *SQLiteStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID s
 	}
 
 	return nil
+}
+
+// UpdateRunError sets the error message for a run.
+func (s *SQLiteStore) UpdateRunError(ctx context.Context, runID string, errMsg string) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE runs SET error = ?, updated_at = ? WHERE id = ?", errMsg, time.Now(), runID)
+	return err
 }
