@@ -356,3 +356,68 @@ def main(ctx, input):
 	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
 	require.Equal(t, "pong: test", outputResp.Message)
 }
+
+func TestWorkflow_DeterministicFunctions(t *testing.T) {
+	store := NewMemoryStore(t)
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+
+	script := `
+load("proto", "proto")
+load("time", "sleep", "now")
+load("rand", "int")
+
+def main(ctx, input):
+	now1 = now(ctx=ctx)
+	now2 = now(ctx=ctx)
+	rand1 = int(ctx=ctx, max=100)
+	rand2 = int(ctx=ctx, max=200)
+	ping_proto = proto.file("ping.proto")
+	message = "now1: " + str(now1) + ", now2: " + str(now2) + ", rand1: " + str(rand1) + ", rand2: " + str(rand2)
+	return ping_proto.PingResponse(message=message)
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
+	require.NoError(t, err)
+
+	// Process the workflow
+	wf.ProcessOnce(t.Context())
+
+	// Fetch run output
+	run, err := client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+
+	// Verify events were recorded
+	events, err := client.GetEvents(t.Context(), runID)
+	require.NoError(t, err)
+	require.Len(t, events, 4) // 2 time.now events + 2 rand.int events
+
+	// Check that we have the expected event types
+	timeNowCount := 0
+	randIntCount := 0
+	for _, event := range events {
+		switch event.Type {
+		case starflow.EventTypeTimeNow:
+			timeNowCount++
+		case starflow.EventTypeRandInt:
+			randIntCount++
+		}
+	}
+	require.Equal(t, 2, timeNowCount, "Expected 2 time.now events")
+	require.Equal(t, 2, randIntCount, "Expected 2 rand.int events")
+
+	// Verify the output contains the expected values
+	var outputResp testpb.PingResponse
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
+	require.Contains(t, outputResp.Message, "now1:")
+	require.Contains(t, outputResp.Message, "now2:")
+	require.Contains(t, outputResp.Message, "rand1:")
+	require.Contains(t, outputResp.Message, "rand2:")
+
+	t.Log("✅ Deterministic functions test completed successfully!")
+	t.Logf("Run ID: %s", runID)
+	t.Logf("Output: %s", outputResp.Message)
+	t.Logf("Events recorded: %d", len(events))
+}

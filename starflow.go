@@ -46,9 +46,11 @@ type Run struct {
 type EventType string
 
 const (
-	EventTypeCall   EventType = "CALL"
-	EventTypeReturn EventType = "RETURN"
-	EventTypeSleep  EventType = "SLEEP"
+	EventTypeCall    EventType = "CALL"
+	EventTypeReturn  EventType = "RETURN"
+	EventTypeSleep   EventType = "SLEEP"
+	EventTypeTimeNow EventType = "TIME_NOW"
+	EventTypeRandInt EventType = "RAND_INT"
 )
 
 // EventMetadata interface for different event types
@@ -78,6 +80,19 @@ type SleepEvent struct {
 
 func (s SleepEvent) EventType() EventType { return EventTypeSleep }
 
+type TimeNowEvent struct {
+	Timestamp time.Time
+}
+
+func (t TimeNowEvent) EventType() EventType { return EventTypeTimeNow }
+
+type RandIntEvent struct {
+	Max    int64
+	Result int64
+}
+
+func (r RandIntEvent) EventType() EventType { return EventTypeRandInt }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp time.Time
@@ -99,4 +114,14 @@ func (e Event) AsReturnEvent() (ReturnEvent, bool) {
 func (e Event) AsSleepEvent() (SleepEvent, bool) {
 	returnEvent, ok := e.Metadata.(SleepEvent)
 	return returnEvent, ok
+}
+
+func (e Event) AsTimeNowEvent() (TimeNowEvent, bool) {
+	timeNowEvent, ok := e.Metadata.(TimeNowEvent)
+	return timeNowEvent, ok
+}
+
+func (e Event) AsRandIntEvent() (RandIntEvent, bool) {
+	randIntEvent, ok := e.Metadata.(RandIntEvent)
+	return randIntEvent, ok
 }

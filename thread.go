@@ -3,7 +3,7 @@ package starflow
 import (
 	"context"
 	"fmt"
-	"maps"
+	"math/rand"
 	"reflect"
 	"strings"
 	"time"
@@ -15,13 +15,13 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.starlark.net/lib/json"
 	"go.starlark.net/lib/math"
-	starlarktime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Thread executes a single workflow run.
@@ -162,6 +162,113 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 	})
 }
 
+// makeTimeNowBuiltin returns a starlark builtin implementing deterministic time.now.
+func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("now", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var ctxVal starlark.Value
+		if err := starlark.UnpackArgs("now", args, kwargs, "ctx", &ctxVal); err != nil {
+			return nil, err
+		}
+
+		starlarkCtx, ok := ctxVal.(*starlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("first argument must be context")
+		}
+
+		var timestamp time.Time
+		if len(t.events) > 0 {
+			nextEvent := t.events[0]
+			t.events = t.events[1:]
+			if nextEvent.Type != EventTypeTimeNow {
+				return nil, fmt.Errorf("expected time_now event, got %s", nextEvent.Type)
+			}
+
+			timeNowEvent, ok := nextEvent.AsTimeNowEvent()
+			if !ok {
+				return nil, fmt.Errorf("expected time_now event metadata")
+			}
+
+			timestamp = timeNowEvent.Timestamp
+		} else {
+			// record a time_now event
+			timestamp = time.Now()
+			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
+				Timestamp: time.Now(),
+				Type:      EventTypeTimeNow,
+				Metadata:  TimeNowEvent{Timestamp: timestamp},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to record time_now event: %w", err)
+			}
+			t.run.NextEventID = nextEventID
+		}
+
+		// Convert to google.protobuf.Timestamp
+		ts := timestamppb.New(timestamp)
+		return starlarkproto.MakeMessage(ts), nil
+	})
+}
+
+// makeRandIntBuiltin returns a starlark builtin implementing deterministic rand.int.
+func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
+	return starlark.NewBuiltin("int", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var ctxVal starlark.Value
+		var maxVal starlark.Value
+		if err := starlark.UnpackArgs("int", args, kwargs, "ctx", &ctxVal, "max", &maxVal); err != nil {
+			return nil, err
+		}
+
+		starlarkCtx, ok := ctxVal.(*starlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("first argument must be context")
+		}
+
+		max, ok := maxVal.(starlark.Int)
+		if !ok {
+			return nil, fmt.Errorf("max must be an integer")
+		}
+
+		maxInt64, ok := max.Int64()
+		if !ok {
+			return nil, fmt.Errorf("max value too large")
+		}
+
+		var result int64
+		if len(t.events) > 0 {
+			nextEvent := t.events[0]
+			t.events = t.events[1:]
+			if nextEvent.Type != EventTypeRandInt {
+				return nil, fmt.Errorf("expected rand_int event, got %s", nextEvent.Type)
+			}
+
+			randIntEvent, ok := nextEvent.AsRandIntEvent()
+			if !ok {
+				return nil, fmt.Errorf("expected rand_int event metadata")
+			}
+
+			if randIntEvent.Max != maxInt64 {
+				return nil, fmt.Errorf("expected max value %d, got %d", randIntEvent.Max, maxInt64)
+			}
+
+			result = randIntEvent.Result
+		} else {
+			// record a rand_int event
+			result = rand.Int63n(maxInt64)
+			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
+				Timestamp: time.Now(),
+				Type:      EventTypeRandInt,
+				Metadata:  RandIntEvent{Max: maxInt64, Result: result},
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to record rand_int event: %w", err)
+			}
+			t.run.NextEventID = nextEventID
+		}
+
+		return starlark.MakeInt64(result), nil
+	})
+}
+
 func runThread[Input proto.Message, Output proto.Message](
 	ctx context.Context,
 	w *Worker[Input, Output],
@@ -202,8 +309,13 @@ func runThread[Input proto.Message, Output proto.Message](
 			}
 			if module == "time" {
 				members := make(starlark.StringDict)
-				maps.Copy(members, starlarktime.Module.Members)
 				members["sleep"] = t.makeSleepBuiltin()
+				members["now"] = t.makeTimeNowBuiltin()
+				return members, nil
+			}
+			if module == "rand" {
+				members := make(starlark.StringDict)
+				members["int"] = t.makeRandIntBuiltin()
 				return members, nil
 			}
 			if module == "math" {
