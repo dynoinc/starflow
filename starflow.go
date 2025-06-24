@@ -22,15 +22,18 @@ const (
 
 // Run represents a single execution of a workflow.
 type Run struct {
-	ID         string
-	ScriptHash string
-	Status     RunStatus
-	Input      []byte
-	Output     []byte
-	Error      string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	WakeAt     *time.Time
+	ID          string
+	ScriptHash  string
+	Status      RunStatus
+	Input       []byte
+	Output      []byte
+	NextEventID int
+	WorkerID    string
+	LeaseUntil  *time.Time
+	Error       string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	WakeAt      *time.Time
 }
 
 // EventType represents the type of an event in the execution history.

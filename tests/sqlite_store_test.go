@@ -47,6 +47,9 @@ func (s *SQLiteStore) init() error {
 		input BLOB,
 		status TEXT NOT NULL,
 		output BLOB,
+		next_event_id INTEGER NOT NULL DEFAULT 0,
+		worker_id TEXT,
+		lease_until DATETIME,
 		error TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -103,8 +106,8 @@ func (s *SQLiteStore) CreateRun(scriptHash string, input []byte) (string, error)
 	now := time.Now()
 
 	_, err := s.db.Exec(
-		"INSERT INTO runs (id, script_hash, input, status, output, error, created_at, updated_at, wake_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ",
-		runID, scriptHash, input, starflow.RunStatusPending, nil, nil, now, now, nil,
+		"INSERT INTO runs (id, script_hash, input, status, output, next_event_id, worker_id, lease_until, error, created_at, updated_at, wake_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ",
+		runID, scriptHash, input, starflow.RunStatusPending, nil, 0, nil, nil, nil, now, now, nil,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
@@ -120,10 +123,12 @@ func (s *SQLiteStore) GetRun(runID string) (*starflow.Run, error) {
 	var status string
 	var errStr sql.NullString
 	var wakeAt sql.NullTime
+	var leaseUntil sql.NullTime
+	var workerID sql.NullString
 	err := s.db.QueryRow(
-		"SELECT id, script_hash, status, error, input, output, created_at, updated_at, wake_at FROM runs WHERE id = ?",
+		"SELECT id, script_hash, status, next_event_id, worker_id, lease_until, error, input, output, created_at, updated_at, wake_at FROM runs WHERE id = ?",
 		runID,
-	).Scan(&run.ID, &run.ScriptHash, &status, &errStr, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt, &wakeAt)
+	).Scan(&run.ID, &run.ScriptHash, &status, &run.NextEventID, &workerID, &leaseUntil, &errStr, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt, &wakeAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run with ID %s not found", runID)
@@ -136,6 +141,12 @@ func (s *SQLiteStore) GetRun(runID string) (*starflow.Run, error) {
 	}
 	run.Input = inputBytes
 	run.Output = outputBytes
+	if workerID.Valid {
+		run.WorkerID = workerID.String
+	}
+	if leaseUntil.Valid {
+		run.LeaseUntil = &leaseUntil.Time
+	}
 	if wakeAt.Valid {
 		run.WakeAt = &wakeAt.Time
 	}
@@ -145,12 +156,33 @@ func (s *SQLiteStore) GetRun(runID string) (*starflow.Run, error) {
 
 // RecordEvent records an event in the execution history of a run.
 func (s *SQLiteStore) RecordEvent(runID string, event *starflow.Event) error {
-	_, err := s.db.Exec(
-		"INSERT INTO events (run_id, timestamp, type, function_name, correlation_id, input, output, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		runID, event.Timestamp, event.Type, event.FunctionName, event.CorrelationID, event.Input, event.Output, event.Error,
-	)
+	// optimistic concurrency on next_event_id
+	tx, err := s.db.BeginTx(context.Background(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to record event: %w", err)
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		} else {
+			_ = tx.Commit()
+		}
+	}()
+	var nextID int
+	if err = tx.QueryRow("SELECT next_event_id FROM runs WHERE id = ?", runID).Scan(&nextID); err != nil {
+		return err
+	}
+	// insert event with implicit autoincrement but we enforce order via nextID value in runs
+	if _, err = tx.Exec("INSERT INTO events (run_id, timestamp, type, function_name, correlation_id, input, output, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", runID, event.Timestamp, event.Type, event.FunctionName, event.CorrelationID, event.Input, event.Output, event.Error); err != nil {
+		return err
+	}
+	res, err := tx.Exec("UPDATE runs SET next_event_id = next_event_id + 1 WHERE id = ? AND next_event_id = ?", runID, nextID)
+	if err != nil {
+		return err
+	}
+	affected, _ := res.RowsAffected()
+	if affected == 0 {
+		return starflow.ErrConcurrentUpdate
 	}
 	return nil
 }
@@ -207,7 +239,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 		args[i] = st
 	}
 
-	query := fmt.Sprintf(`SELECT id, script_hash, status, error, input, output, created_at, updated_at, wake_at
+	query := fmt.Sprintf(`SELECT id, script_hash, status, next_event_id, worker_id, lease_until, error, input, output, created_at, updated_at, wake_at
 		FROM runs WHERE status IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -221,13 +253,21 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 		var run starflow.Run
 		var status string
 		var errStr sql.NullString
+		var workerID sql.NullString
+		var leaseUntil sql.NullTime
 		var wakeAt sql.NullTime
-		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &errStr, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt, &wakeAt); err != nil {
+		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &run.NextEventID, &workerID, &leaseUntil, &errStr, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt, &wakeAt); err != nil {
 			return nil, err
 		}
 		run.Status = starflow.RunStatus(status)
 		if errStr.Valid {
 			run.Error = errStr.String
+		}
+		if workerID.Valid {
+			run.WorkerID = workerID.String
+		}
+		if leaseUntil.Valid {
+			run.LeaseUntil = &leaseUntil.Time
 		}
 		if wakeAt.Valid {
 			run.WakeAt = &wakeAt.Time
@@ -284,6 +324,9 @@ func (s *SQLiteStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID s
 	if status != "" {
 		setParts = append(setParts, "status = ?")
 		args = append(args, status)
+		if status != starflow.RunStatusRunning {
+			setParts = append(setParts, "worker_id = NULL", "lease_until = NULL")
+		}
 	}
 
 	if wakeAt != nil {
@@ -305,4 +348,15 @@ func (s *SQLiteStore) UpdateRunStatusAndRecordEvent(ctx context.Context, runID s
 func (s *SQLiteStore) UpdateRunError(ctx context.Context, runID string, errMsg string) error {
 	_, err := s.db.ExecContext(ctx, "UPDATE runs SET error = ?, status = ?, updated_at = ? WHERE id = ?", errMsg, starflow.RunStatusFailed, time.Now(), runID)
 	return err
+}
+
+// ClaimRun attempts to claim a run for execution.
+func (s *SQLiteStore) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE runs SET status = ?, worker_id = ?, lease_until = ?, updated_at = ? WHERE id = ? AND (worker_id IS NULL OR lease_until < ?) AND status IN (?, ?)`,
+		starflow.RunStatusRunning, workerID, leaseUntil, time.Now(), runID, time.Now(), starflow.RunStatusPending, starflow.RunStatusWaiting)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := res.RowsAffected()
+	return rows == 1, nil
 }

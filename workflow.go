@@ -27,6 +27,9 @@ import (
 // ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
 var ErrYield = errors.New("workflow yielded")
 
+// ErrConcurrentUpdate is returned when a concurrent update is detected.
+var ErrConcurrentUpdate = errors.New("concurrent update detected")
+
 // yieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
 type yieldError struct {
 	cid string
@@ -303,8 +306,10 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	globalsAfterExec, err := starlark.ExecFile(thread, "script", script, globals)
 	if err != nil {
 		if errors.Is(err, ErrYield) {
-			// Yield is an expected pause, status already set to WAITING in wrapFn.
-			return zero, nil
+			return zero, nil // expected pause
+		}
+		if errors.Is(err, ErrConcurrentUpdate) {
+			return zero, ErrConcurrentUpdate
 		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
 		return zero, fmt.Errorf("starlark execution failed: %w", err)

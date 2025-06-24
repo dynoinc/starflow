@@ -25,6 +25,9 @@ type Store interface {
 	// ListRuns returns all runs whose status matches any of the supplied states.
 	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
 
+	// ClaimRun attempts to mark a run as RUNNING with worker id and lease. Returns true if successful.
+	ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error)
+
 	// Events
 	// RecordEvent records an event in the execution history of a run.
 	RecordEvent(runID string, event *Event) error

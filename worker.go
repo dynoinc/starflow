@@ -2,8 +2,10 @@ package starflow
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -36,12 +38,17 @@ func (wk *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			}
 		}
 
-		// Attempt to claim the run by setting it to RUNNING; ignore if already claimed.
-		if err := wk.wf.store.UpdateRunStatusAndRecordEvent(ctx, r.ID, RunStatusRunning, nil, nil); err != nil {
+		leaseUntil := time.Now().Add(5 * time.Second)
+		workerID := "worker" + shortuuid.New()
+		ok, err := wk.wf.store.ClaimRun(ctx, r.ID, workerID, leaseUntil)
+		if err != nil || !ok {
 			continue
 		}
 		// Execute the run; outcome handling is inside execute/resumeRun.
-		_, _ = wk.wf.resumeRun(ctx, r.ID)
+		_, err = wk.wf.resumeRun(ctx, r.ID)
+		if errors.Is(err, ErrConcurrentUpdate) {
+			continue
+		}
 	}
 }
 
