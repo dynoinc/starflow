@@ -35,7 +35,7 @@ type Run struct {
 
 	// Set when finished.
 	Output []byte
-	Error  string
+	Error  error
 
 	// Set when claimed by a worker
 	WorkerID   string
@@ -48,6 +48,7 @@ type EventType string
 const (
 	EventTypeCall   EventType = "CALL"
 	EventTypeReturn EventType = "RETURN"
+	EventTypeSleep  EventType = "SLEEP"
 )
 
 // EventMetadata interface for different event types
@@ -57,7 +58,8 @@ type EventMetadata interface {
 
 // CallEvent metadata
 type CallEvent struct {
-	Input *anypb.Any
+	FunctionName string
+	Input        *anypb.Any
 }
 
 func (c CallEvent) EventType() EventType { return EventTypeCall }
@@ -65,18 +67,22 @@ func (c CallEvent) EventType() EventType { return EventTypeCall }
 // ReturnEvent metadata
 type ReturnEvent struct {
 	Output *anypb.Any
-	Error  string
+	Error  error
 }
 
 func (r ReturnEvent) EventType() EventType { return EventTypeReturn }
 
+type SleepEvent struct {
+	WakeupAt time.Time
+}
+
+func (s SleepEvent) EventType() EventType { return EventTypeSleep }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
-	Timestamp    time.Time
-	Type         EventType
-	FunctionName string
-	// Generic metadata that can hold different types
-	Metadata EventMetadata
+	Timestamp time.Time
+	Type      EventType
+	Metadata  EventMetadata
 }
 
 // Helper methods for type-safe access

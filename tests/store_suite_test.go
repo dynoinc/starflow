@@ -45,7 +45,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		require.NoError(t, err)
 		require.Equal(t, int64(0), run.NextEventID)
 
-		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
+		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn"}}
 		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, evt)
 		require.NoError(t, err)
 		require.Equal(t, int64(1), nextEventID)
@@ -59,7 +59,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
+		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn"}}
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
 		require.NoError(t, err)
 
