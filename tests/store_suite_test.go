@@ -36,6 +36,21 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		}
 	})
 
+	t.Run("RecordEvent_UpdateNextEventID", func(t *testing.T) {
+		s := newStore(t)
+		id, err := s.CreateRun(ctx, "h", nil)
+		require.NoError(t, err)
+
+		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, 0, run.NextEventID)
+
+		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
+		err = s.RecordEvent(ctx, run, evt)
+		require.NoError(t, err)
+		require.Equal(t, 1, run.NextEventID)
+	})
+
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
 		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
