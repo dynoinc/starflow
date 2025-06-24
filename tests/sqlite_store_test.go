@@ -238,22 +238,6 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 	return runs, nil
 }
 
-// GetEventByCorrelationID retrieves an event by runID and correlationID.
-func (s *SQLiteStore) GetEventByCorrelationID(runID string, cid string) (*starflow.Event, error) {
-	var e starflow.Event
-	var eventType string
-	row := s.db.QueryRow(`SELECT timestamp, type, function_name, input, output, error FROM events WHERE run_id = ? AND correlation_id = ? LIMIT 1`, runID, cid)
-	if err := row.Scan(&e.Timestamp, &eventType, &e.FunctionName, &e.Input, &e.Output, &e.Error); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("event with correlation_id %s not found", cid)
-		}
-		return nil, fmt.Errorf("failed to query event: %w", err)
-	}
-	e.Type = starflow.EventType(eventType)
-	e.CorrelationID = cid
-	return &e, nil
-}
-
 // FindEventByCorrelationID retrieves event and runID for correlation id.
 func (s *SQLiteStore) FindEventByCorrelationID(cid string) (string, *starflow.Event, error) {
 	row := s.db.QueryRow(`SELECT run_id, timestamp, type, function_name, input, output, error FROM events WHERE correlation_id = ? LIMIT 1`, cid)
@@ -269,12 +253,6 @@ func (s *SQLiteStore) FindEventByCorrelationID(cid string) (string, *starflow.Ev
 	e.Type = starflow.EventType(eventType)
 	e.CorrelationID = cid
 	return runID, &e, nil
-}
-
-// UpdateRunWakeUp sets or clears the wake_at timestamp for a run.
-func (s *SQLiteStore) UpdateRunWakeUp(ctx context.Context, runID string, wakeAt *time.Time) error {
-	_, err := s.db.ExecContext(ctx, "UPDATE runs SET wake_at = ?, updated_at = ? WHERE id = ?", wakeAt, time.Now(), runID)
-	return err
 }
 
 // UpdateRunStatusAndRecordEvent executes event insert and status/wake_at update atomically.

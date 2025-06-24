@@ -566,7 +566,6 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 
 // Signal delivers an external response to a previously yielded function call, identified by its correlation ID.
 func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID string, resp proto.Message) error {
-	// Locate event and run
 	runID, yieldEvent, err := w.store.FindEventByCorrelationID(correlationID)
 	if err != nil {
 		return err
