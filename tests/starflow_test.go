@@ -257,9 +257,7 @@ load("proto", "proto")
 
 def main(ctx, input):
 	ping_proto = proto.file("ping.proto")
-	# This call will fail
-	result = failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
-	return result
+	return failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
@@ -279,8 +277,8 @@ def main(ctx, input):
 	t.Logf("Run Output length: %d", len(run.Output))
 
 	require.Equal(t, starflow.RunStatusFailed, run.Status)
-	require.NotEmpty(t, run.Error)
-	require.Contains(t, run.Error, "intentional failure: should fail")
+	require.Error(t, run.Error)
+	require.Contains(t, run.Error.Error(), "intentional failure: should fail")
 
 	// Verify events show the failure
 	events, err := client.GetEvents(t.Context(), runID)
@@ -299,8 +297,8 @@ def main(ctx, input):
 		require.Equal(t, "failingFn", callEvent.FunctionName)
 	}
 	if returnEvent, ok := events[1].AsReturnEvent(); ok {
-		require.NotEmpty(t, returnEvent.Error)
-		require.Contains(t, returnEvent.Error, "intentional failure: should fail")
+		require.Error(t, returnEvent.Error)
+		require.Contains(t, returnEvent.Error.Error(), "intentional failure: should fail")
 	}
 
 	t.Log("✅ Workflow failure correctly detected!")
