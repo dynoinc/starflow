@@ -56,8 +56,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		require.NoError(t, err)
 		require.Equal(t, int64(0), run.NextEventID)
 
-		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn"}}
-		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, evt)
+		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, starflow.CallEvent{FunctionName: "fn"})
 		require.NoError(t, err)
 		require.Equal(t, int64(1), nextEventID)
 	})
@@ -70,19 +69,17 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn"}}
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.CallEvent{FunctionName: "fn"})
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.CallEvent{FunctionName: "fn"})
 		require.Error(t, err)
 		require.Equal(t, err, starflow.ErrConcurrentUpdate)
 	})
 
 	t.Run("RecordEventWithInvalidRunID", func(t *testing.T) {
 		s := newStore(t)
-		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn"}}
-		_, err := s.RecordEvent(ctx, "non-existent-run-id", 0, evt)
+		_, err := s.RecordEvent(ctx, "non-existent-run-id", 0, starflow.CallEvent{FunctionName: "fn"})
 		require.Error(t, err, "recording event with invalid runID should fail")
 	})
 
@@ -95,12 +92,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		require.NoError(t, err)
 
 		testError := errors.New("test error")
-		evt := &starflow.Event{
-			Timestamp: time.Now(),
-			Type:      starflow.EventTypeReturn,
-			Metadata:  starflow.ReturnEvent{Error: testError},
-		}
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ReturnEvent{Error: testError})
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
@@ -118,12 +110,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		evt := &starflow.Event{
-			Timestamp: time.Now(),
-			Type:      starflow.EventTypeYield,
-			Metadata:  starflow.YieldEvent{SignalID: "test-signal-id"},
-		}
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.YieldEvent{SignalID: "test-signal-id"})
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
@@ -196,12 +183,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		yieldEvent := &starflow.Event{
-			Timestamp: time.Now(),
-			Type:      starflow.EventTypeYield,
-			Metadata:  starflow.YieldEvent{SignalID: "test-signal"},
-		}
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, yieldEvent)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.YieldEvent{SignalID: "test-signal"})
 		require.NoError(t, err)
 
 		// Now delete the run (simulate non-existent run)
@@ -228,12 +210,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		yieldEvent := &starflow.Event{
-			Timestamp: time.Now(),
-			Type:      starflow.EventTypeYield,
-			Metadata:  starflow.YieldEvent{SignalID: "test-signal"},
-		}
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, yieldEvent)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.YieldEvent{SignalID: "test-signal"})
 		require.NoError(t, err)
 
 		// First signal should succeed
@@ -298,23 +275,19 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		require.NoError(t, err)
 
 		// Record multiple events
-		evt1 := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn1"}}
-		evt2 := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, Metadata: starflow.CallEvent{FunctionName: "fn2"}}
-		evt3 := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeReturn, Metadata: starflow.ReturnEvent{}}
-
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt1)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.CallEvent{FunctionName: "fn1"})
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt2)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.CallEvent{FunctionName: "fn2"})
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt3)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ReturnEvent{})
 		require.NoError(t, err)
 
 		// Get all events

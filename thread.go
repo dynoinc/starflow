@@ -32,6 +32,32 @@ type thread[Input proto.Message, Output proto.Message] struct {
 	events []*Event
 }
 
+func popEvent[ET EventMetadata, Input proto.Message, Output proto.Message](t *thread[Input, Output]) (ET, error, bool) {
+	var zero ET
+	if len(t.events) == 0 {
+		return zero, nil, false
+	}
+
+	nextEvent := t.events[0]
+	t.events = t.events[1:]
+
+	if nextEvent.Type != zero.EventType() {
+		return zero, fmt.Errorf("expected event type %s, got %s", zero.EventType(), nextEvent.Type), false
+	}
+
+	return nextEvent.Metadata.(ET), nil, true
+}
+
+func recordEvent[ET EventMetadata, Input proto.Message, Output proto.Message](ctx context.Context, t *thread[Input, Output], event ET) error {
+	nextEventID, err := t.w.store.RecordEvent(ctx, t.run.ID, t.run.NextEventID, event)
+	if err != nil {
+		return fmt.Errorf("failed to record event: %w", err)
+	}
+
+	t.run.NextEventID = nextEventID
+	return nil
+}
+
 // createInputInstance creates a new instance of the Input type using reflection
 func (t *thread[Input, Output]) createInputInstance() Input {
 	var zero Input
@@ -127,30 +153,16 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 		}
 
 		sleepDuration := durMsg.AsDuration()
-		if len(t.events) > 0 {
-			nextEvent := t.events[0]
-			t.events = t.events[1:]
-			if nextEvent.Type != EventTypeSleep {
-				return nil, fmt.Errorf("expected sleep event, got %s", nextEvent.Type)
-			}
-
-			sleepEvent, ok := nextEvent.AsSleepEvent()
-			if !ok {
-				return nil, fmt.Errorf("expected sleep event metadata")
+		if sleepEvent, err, ok := popEvent[SleepEvent](t); ok {
+			if err != nil {
+				return nil, err
 			}
 
 			sleepDuration = time.Until(sleepEvent.WakeupAt)
 		} else {
-			// record a sleep event
-			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
-				Timestamp: time.Now(),
-				Type:      EventTypeSleep,
-				Metadata:  SleepEvent{WakeupAt: time.Now().Add(sleepDuration)},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to record sleep event: %w", err)
+			if err := recordEvent(starlarkCtx.ctx, t, SleepEvent{WakeupAt: time.Now().Add(sleepDuration)}); err != nil {
+				return nil, err
 			}
-			t.run.NextEventID = nextEventID
 		}
 
 		select {
@@ -177,31 +189,18 @@ func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
 		}
 
 		var timestamp time.Time
-		if len(t.events) > 0 {
-			nextEvent := t.events[0]
-			t.events = t.events[1:]
-			if nextEvent.Type != EventTypeTimeNow {
-				return nil, fmt.Errorf("expected time_now event, got %s", nextEvent.Type)
-			}
-
-			timeNowEvent, ok := nextEvent.AsTimeNowEvent()
-			if !ok {
-				return nil, fmt.Errorf("expected time_now event metadata")
+		if timeNowEvent, err, ok := popEvent[TimeNowEvent](t); ok {
+			if err != nil {
+				return nil, err
 			}
 
 			timestamp = timeNowEvent.Timestamp
 		} else {
 			// record a time_now event
 			timestamp = time.Now()
-			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
-				Timestamp: time.Now(),
-				Type:      EventTypeTimeNow,
-				Metadata:  TimeNowEvent{Timestamp: timestamp},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to record time_now event: %w", err)
+			if err := recordEvent(starlarkCtx.ctx, t, TimeNowEvent{Timestamp: timestamp}); err != nil {
+				return nil, err
 			}
-			t.run.NextEventID = nextEventID
 		}
 
 		// Convert to google.protobuf.Timestamp
@@ -235,16 +234,9 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 		}
 
 		var result int64
-		if len(t.events) > 0 {
-			nextEvent := t.events[0]
-			t.events = t.events[1:]
-			if nextEvent.Type != EventTypeRandInt {
-				return nil, fmt.Errorf("expected rand_int event, got %s", nextEvent.Type)
-			}
-
-			randIntEvent, ok := nextEvent.AsRandIntEvent()
-			if !ok {
-				return nil, fmt.Errorf("expected rand_int event metadata")
+		if randIntEvent, err, ok := popEvent[RandIntEvent](t); ok {
+			if err != nil {
+				return nil, err
 			}
 
 			if randIntEvent.Max != maxInt64 {
@@ -255,15 +247,9 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 		} else {
 			// record a rand_int event
 			result = rand.Int63n(maxInt64)
-			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, &Event{
-				Timestamp: time.Now(),
-				Type:      EventTypeRandInt,
-				Metadata:  RandIntEvent{Max: maxInt64, Result: result},
-			})
-			if err != nil {
-				return nil, fmt.Errorf("failed to record rand_int event: %w", err)
+			if err := recordEvent(starlarkCtx.ctx, t, RandIntEvent{Max: maxInt64, Result: result}); err != nil {
+				return nil, err
 			}
-			t.run.NextEventID = nextEventID
 		}
 
 		return starlark.MakeInt64(result), nil
@@ -448,16 +434,9 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			}
 		} else {
 			inputAny, _ := anypb.New(req)
-			nextEventID, err := t.w.store.RecordEvent(ctx, t.run.ID, t.run.NextEventID, &Event{
-				Timestamp: time.Now(),
-				Type:      EventTypeCall,
-				Metadata:  CallEvent{FunctionName: regFn.name, Input: inputAny},
-			})
-			if err != nil {
-				return starlark.None, fmt.Errorf("failed to record call event: %w", err)
+			if err := recordEvent(starlarkCtx.ctx, t, CallEvent{FunctionName: regFn.name, Input: inputAny}); err != nil {
+				return starlark.None, err
 			}
-
-			t.run.NextEventID = nextEventID
 		}
 
 		if len(t.events) > 0 {
@@ -555,21 +534,16 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			callErr = callFunc()
 		}
 
-		event := &Event{
-			Timestamp: time.Now(),
-		}
-
+		var event EventMetadata
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
 			wrapFnSpan.SetStatus(codes.Error, yerr.Error())
 
-			event.Type = EventTypeYield
-			event.Metadata = YieldEvent{SignalID: yerr.cid}
+			event = YieldEvent{SignalID: yerr.cid}
 		} else if callErr != nil {
 			wrapFnSpan.SetStatus(codes.Error, callErr.Error())
 
-			event.Type = EventTypeReturn
-			event.Metadata = ReturnEvent{Error: callErr}
+			event = ReturnEvent{Error: callErr}
 		} else {
 			wrapFnSpan.SetStatus(codes.Ok, "success")
 			outputAny, err := anypb.New(resp)
@@ -577,15 +551,12 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
 			}
 
-			event.Type = EventTypeReturn
-			event.Metadata = ReturnEvent{Output: outputAny}
+			event = ReturnEvent{Output: outputAny}
 		}
 
-		nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, event)
-		if err != nil {
-			return starlark.None, fmt.Errorf("failed to record return event: %w", err)
+		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {
+			return starlark.None, err
 		}
-		t.run.NextEventID = nextEventID
 
 		return starlarkproto.MakeMessage(resp), callErr
 	})

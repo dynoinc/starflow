@@ -45,6 +45,6 @@ type Store interface {
 	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID.
 	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
-	RecordEvent(ctx context.Context, runID string, nextEventID int64, event *Event) (int64, error)
+	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata EventMetadata) (int64, error)
 	GetEvents(ctx context.Context, runID string) ([]*Event, error)
 }

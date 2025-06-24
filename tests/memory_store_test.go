@@ -142,7 +142,7 @@ func (s *MemoryStore) ClaimRun(ctx context.Context, runID string, workerID strin
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 // On success the store increments NextEventID by one.
-func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, event *starflow.Event) (int64, error) {
+func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata starflow.EventMetadata) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -157,6 +157,12 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 	}
 
 	// Add event to the list
+	event := &starflow.Event{
+		Timestamp: time.Now(),
+		Type:      eventMetadata.EventType(),
+		Metadata:  eventMetadata,
+	}
+
 	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
