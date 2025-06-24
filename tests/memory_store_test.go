@@ -31,7 +31,7 @@ func NewMemoryStore(t *testing.T) *MemoryStore {
 }
 
 // SaveScript persists the Starlark script content.
-func (s *MemoryStore) SaveScript(content []byte) (string, error) {
+func (s *MemoryStore) SaveScript(ctx context.Context, content []byte) (string, error) {
 	hash := sha256.Sum256(content)
 	hashStr := hex.EncodeToString(hash[:])
 
@@ -43,7 +43,7 @@ func (s *MemoryStore) SaveScript(content []byte) (string, error) {
 }
 
 // GetScript retrieves a script by its sha256 hash.
-func (s *MemoryStore) GetScript(scriptHash string) ([]byte, error) {
+func (s *MemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -55,7 +55,7 @@ func (s *MemoryStore) GetScript(scriptHash string) ([]byte, error) {
 }
 
 // CreateRun creates a new run record for a given script.
-func (s *MemoryStore) CreateRun(scriptHash string, input []byte) (string, error) {
+func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input []byte) (string, error) {
 	runID := shortuuid.New()
 	now := time.Now()
 
@@ -78,7 +78,7 @@ func (s *MemoryStore) CreateRun(scriptHash string, input []byte) (string, error)
 }
 
 // GetRun retrieves the details of a specific run.
-func (s *MemoryStore) GetRun(runID string) (*starflow.Run, error) {
+func (s *MemoryStore) GetRun(ctx context.Context, runID string) (*starflow.Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -139,32 +139,33 @@ func (s *MemoryStore) ClaimRun(ctx context.Context, runID string, workerID strin
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 // On success the store increments NextEventID by one.
-func (s *MemoryStore) RecordEvent(runID string, expectedNextID int, event *starflow.Event) error {
+func (s *MemoryStore) RecordEvent(ctx context.Context, run *starflow.Run, event *starflow.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	run, exists := s.runs[runID]
+	storedRun, exists := s.runs[run.ID]
 	if !exists {
-		return fmt.Errorf("run with ID %s not found", runID)
+		return fmt.Errorf("run with ID %s not found", run.ID)
 	}
 
 	// Check optimistic concurrency precondition
-	if run.NextEventID != expectedNextID {
+	if storedRun.NextEventID != run.NextEventID {
 		return starflow.ErrConcurrentUpdate
 	}
 
 	// Add event to the list
-	s.events[runID] = append(s.events[runID], event)
+	s.events[run.ID] = append(s.events[run.ID], event)
 
-	// Increment NextEventID
+	// Update the runs
 	run.NextEventID++
 	run.UpdatedAt = time.Now()
-
+	storedRun.NextEventID++
+	storedRun.UpdatedAt = time.Now()
 	return nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
-func (s *MemoryStore) GetEvents(runID string) ([]*starflow.Event, error) {
+func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

@@ -16,7 +16,7 @@ import (
 func TestWorkflow(t *testing.T) {
 	store := NewMemoryStore(t)
 
-	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
@@ -32,38 +32,29 @@ def main(ctx, input):
 	return output
 `
 
-	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "hello"})
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "hello"})
 	require.NoError(t, err)
 
-	worker := wf.NewWorker(0)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
-	run, err := store.GetRun(runID)
+	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
-	var outputMsg testpb.PingResponse
-
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
-	events, err := store.GetEvents(runID)
+	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-
 	require.Len(t, events, 2)
-
 	require.Equal(t, starflow.EventTypeCall, events[0].Type)
 	require.Equal(t, "pingFn", events[0].FunctionName)
-
 	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
 	require.Empty(t, events[1].Error)
 
-	require.NoError(t, proto.Unmarshal(run.Output, &outputMsg))
-
-	require.Equal(t, "pong: hello", outputMsg.Message)
-
-	fmt.Println("events:")
-	for _, e := range events {
-		fmt.Printf("%+v\n", *e)
-	}
+	var outputResp testpb.PingResponse
+	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
+	require.Equal(t, "pong: hello", outputResp.Message)
 }
 
 // TestWorkflowLibraryUsage demonstrates how to use the starflow library.
@@ -72,7 +63,7 @@ func TestWorkflowLibraryUsage(t *testing.T) {
 	store := NewMemoryStore(t)
 
 	// Step 3: Create the workflow and register functions
-	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
 	httpCallFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "HTTP response simulated"}, nil
@@ -109,15 +100,16 @@ def main(ctx, input):
 `
 
 	// Step 5: Run the workflow
-	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "example"})
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "example"})
 	require.NoError(t, err)
 
 	// Step 6: Execute the workflow
-	worker := wf.NewWorker(0)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
-	run, err := store.GetRun(runID)
+	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	var outputResp testpb.PingResponse
 	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
@@ -129,7 +121,7 @@ def main(ctx, input):
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	// Step 8: Check that all function calls were recorded
-	events, err := store.GetEvents(runID)
+	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
 	require.NoError(t, err)
 
@@ -149,11 +141,6 @@ def main(ctx, input):
 		require.Equal(t, expectedFunc, event.FunctionName, "event %d function name mismatch", i)
 	}
 
-	fmt.Println("events:")
-	for _, e := range events {
-		fmt.Printf("%+v\n", *e)
-	}
-
 	t.Log("✅ Workflow completed successfully!")
 	t.Logf("Run ID: %s", runID)
 	t.Logf("Output: %s", outputResp.Message)
@@ -163,7 +150,7 @@ def main(ctx, input):
 func TestWorkflow_StarlarkMathImport(t *testing.T) {
 	store := NewMemoryStore(t)
 
-	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
@@ -180,14 +167,15 @@ def main(ctx, input):
     return proto.file("ping.proto").PingResponse(message=str(result))
 `
 
-	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "test"})
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
 	require.NoError(t, err)
 
-	worker := wf.NewWorker(0)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
-	run, err := store.GetRun(runID)
+	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	var outputResp testpb.PingResponse
 	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
@@ -198,7 +186,7 @@ def main(ctx, input):
 func TestWorkflow_RetryPolicy(t *testing.T) {
 	store := NewMemoryStore(t)
 
-	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 
 	attempts := 0
 	flakyFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -220,23 +208,22 @@ def main(ctx, input):
 	return flakyFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
-	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "retry"})
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "retry"})
 	require.NoError(t, err)
 
-	worker := wf.NewWorker(0)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 	worker.ProcessOnce(t.Context())
 
 	require.Equal(t, 3, attempts)
 
-	run, err := store.GetRun(runID)
+	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 }
 
 func TestWorkflow_SleepFunction(t *testing.T) {
 	store := NewMemoryStore(t)
-
-	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
 	script := `
 load("proto", "proto")
@@ -248,12 +235,13 @@ def main(ctx, input):
 	return proto.file("ping.proto").PingResponse(message="woke")
 `
 
-	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "zzz"})
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "zzz"})
 	require.NoError(t, err)
 
-	worker := wf.NewWorker(0)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
 	worker.ProcessOnce(t.Context()) // should complete
 
-	run, _ := store.GetRun(runID)
+	run, _ := client.GetRun(t.Context(), runID)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 }
