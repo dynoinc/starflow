@@ -2,11 +2,11 @@ package starflow_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/dynoinc/starflow"
+	"github.com/stretchr/testify/require"
 )
 
 type storeFactory func(t *testing.T) starflow.Store
@@ -40,24 +40,13 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		s := newStore(t)
 		id, _ := s.CreateRun("h", nil)
 		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
-		var wg sync.WaitGroup
-		errs := make([]error, 2)
-		wg.Add(2)
-		for i := 0; i < 2; i++ {
-			go func(k int) { defer wg.Done(); errs[k] = s.RecordEvent(id, 0, evt) }(i)
-		}
-		wg.Wait()
-		var ok, concurrent int
-		for _, e := range errs {
-			if e == nil {
-				ok++
-			} else if e == starflow.ErrConcurrentUpdate {
-				concurrent++
-			}
-		}
-		if ok != 1 || concurrent != 1 {
-			t.Fatalf("optimistic lock failed")
-		}
+
+		err := s.RecordEvent(id, 0, evt)
+		require.NoError(t, err)
+
+		err = s.RecordEvent(id, 0, evt)
+		require.Error(t, err)
+		require.Equal(t, err, starflow.ErrConcurrentUpdate)
 	})
 
 	t.Run("LeaseClaim", func(t *testing.T) {

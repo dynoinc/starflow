@@ -9,6 +9,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/dynoinc/starflow"
 	testpb "github.com/dynoinc/starflow/tests/proto"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -32,54 +33,32 @@ def main(ctx, input):
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "hello"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
 	worker.ProcessOnce(context.Background())
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
+	require.NoError(t, err)
 	var outputMsg testpb.PingResponse
 
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
-	}
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	events, err := store.GetEvents(runID)
-	if err != nil {
-		t.Fatalf("failed to get events: %v", err)
-	}
+	require.NoError(t, err)
 
-	if len(events) != 2 {
-		t.Fatalf("expected 2 events, got %d", len(events))
-	}
+	require.Len(t, events, 2)
 
-	if events[0].Type != starflow.EventTypeCall {
-		t.Errorf("expected first event to be CALL, got %s", events[0].Type)
-	}
-	if events[0].FunctionName != "pingFn" {
-		t.Errorf("expected first event to be for function pingFn, got %s", events[0].FunctionName)
-	}
+	require.Equal(t, starflow.EventTypeCall, events[0].Type)
+	require.Equal(t, "pingFn", events[0].FunctionName)
 
-	if events[1].Type != starflow.EventTypeReturn {
-		t.Errorf("expected second event to be RETURN, got %s", events[1].Type)
-	}
-	if events[1].Error != "" {
-		t.Errorf("expected second event to have no error, got %s", events[1].Error)
-	}
+	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
+	require.Empty(t, events[1].Error)
 
-	if err := proto.Unmarshal(run.Output, &outputMsg); err != nil {
-		t.Fatalf("failed to unmarshal output: %v", err)
-	}
+	require.NoError(t, proto.Unmarshal(run.Output, &outputMsg))
 
-	if outputMsg.Message != "pong: hello" {
-		t.Errorf("expected output message to be 'pong: hello', got %s", outputMsg.Message)
-	}
+	require.Equal(t, "pong: hello", outputMsg.Message)
 
 	fmt.Println("events:")
 	for _, e := range events {
@@ -134,33 +113,23 @@ def main(ctx, input):
 		CreditCardNumber: "1234-5678-8765-4321",
 	})
 
-	if err != nil {
-		t.Fatalf("failed to create run: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Try to execute - this should fail
 	worker1 := wf1.NewWorker(0)
 	worker1.ProcessOnce(context.Background())
 
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
-	if run.Status != starflow.RunStatusFailed {
-		t.Errorf("expected run status to be FAILED, got %s", run.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusFailed, run.Status)
 
 	// --- Second run: Resumes and succeeds ---
 	bakingShouldFail = false
 
 	// Get current run state to get NextEventID
 	run, err = store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run state: %v", err)
-	}
-	if err := store.UpdateRunStatusAndRecordEvent(context.Background(), runID, run.NextEventID, starflow.RunStatusPending, nil, nil); err != nil {
-		t.Fatalf("failed to reset status: %v", err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, store.UpdateRunStatusAndRecordEvent(context.Background(), runID, run.NextEventID, starflow.RunStatusPending, nil, nil))
 
 	wf2 := starflow.New[*testpb.OrderPizzaRequest, *testpb.OrderPizzaResponse](store)
 	starflow.Register(wf2, paymentFn, starflow.WithName("paymentFn"))
@@ -170,30 +139,18 @@ def main(ctx, input):
 	worker2.ProcessOnce(context.Background())
 
 	run, err = store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run after second processing: %v", err)
-	}
+	require.NoError(t, err)
 
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
-	}
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	var outResp testpb.OrderPizzaResponse
-	if err := proto.Unmarshal(run.Output, &outResp); err != nil {
-		t.Fatalf("failed to unmarshal output: %v", err)
-	}
+	require.NoError(t, proto.Unmarshal(run.Output, &outResp))
 
-	if outResp.Status != "ORDER_COMPLETE" {
-		t.Errorf("expected output status to be ORDER_COMPLETE, got %s", outResp.Status)
-	}
+	require.Equal(t, "ORDER_COMPLETE", outResp.Status)
 
 	events, err := store.GetEvents(runID)
-	if err != nil {
-		t.Fatalf("failed to get events after second processing: %v", err)
-	}
-	if len(events) != 6 {
-		t.Fatalf("expected 6 events after second processing, got %d", len(events))
-	}
+	require.NoError(t, err)
+	require.Len(t, events, 6)
 
 	fmt.Println("events:")
 	for _, e := range events {
@@ -245,9 +202,7 @@ def main(ctx, input):
 
 	// Step 5: Run the workflow
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "example"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Step 6: Execute the workflow
 	worker := wf.NewWorker(0)
@@ -255,34 +210,23 @@ def main(ctx, input):
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
+	require.NoError(t, err)
 	var outputResp testpb.PingResponse
-	if err := proto.Unmarshal(run.Output, &outputResp); err != nil {
-		t.Fatalf("failed to unmarshal output: %v", err)
-	}
+	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
 
 	expectedMessage := "Completed: HTTP response simulated + DB result for: db_example"
-	if outputResp.Message != expectedMessage {
-		t.Errorf("expected output message to be %s, got %s", expectedMessage, outputResp.Message)
-	}
+	require.Equal(t, expectedMessage, outputResp.Message)
 
 	// Step 7: Verify the workflow completed successfully
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected run status to be COMPLETED, got %s", run.Status)
-	}
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	// Step 8: Check that all function calls were recorded
 	events, err := store.GetEvents(runID)
-	if err != nil {
-		t.Fatalf("failed to get events: %v", err)
-	}
+	require.NoError(t, err)
+	require.NoError(t, err)
 
 	// Should have 4 events: 2 calls + 2 returns
-	if len(events) != 4 {
-		t.Fatalf("expected 4 events, got %d", len(events))
-	}
+	require.Equal(t, 4, len(events))
 
 	// Verify the events are for our functions
 	expectedFunctions := []string{"httpCallFn", "httpCallFn", "dbQueryFn", "dbQueryFn"}
@@ -292,13 +236,9 @@ def main(ctx, input):
 	}
 
 	for i, event := range events {
-		if event.Type != expectedTypes[i] {
-			t.Errorf("event %d: expected type %s, got %s", i, expectedTypes[i], event.Type)
-		}
+		require.Equal(t, expectedTypes[i], event.Type, "event %d type mismatch", i)
 		expectedFunc := expectedFunctions[i]
-		if expectedFunc != event.FunctionName {
-			t.Errorf("event %d: expected function %s, got %s", i, expectedFunc, event.FunctionName)
-		}
+		require.Equal(t, expectedFunc, event.FunctionName, "event %d function name mismatch", i)
 	}
 
 	fmt.Println("events:")
@@ -333,26 +273,18 @@ def main(ctx, input):
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "test"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
 	worker.ProcessOnce(context.Background())
 
 	// Fetch run output
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
+	require.NoError(t, err)
 	var outputResp testpb.PingResponse
-	if err := proto.Unmarshal(run.Output, &outputResp); err != nil {
-		t.Fatalf("failed to unmarshal output: %v", err)
-	}
+	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
 
-	if outputResp.Message != "4" && outputResp.Message != "4.0" {
-		t.Errorf("expected output message to be '4' or '4.0', got %s", outputResp.Message)
-	}
+	require.Contains(t, []string{"4", "4.0"}, outputResp.Message)
 }
 
 func TestWorkflow_RetryPolicy(t *testing.T) {
@@ -381,24 +313,16 @@ def main(ctx, input):
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "retry"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
 	worker.ProcessOnce(context.Background())
 
-	if attempts != 3 {
-		t.Errorf("expected 3 attempts, got %d", attempts)
-	}
+	require.Equal(t, 3, attempts)
 
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected COMPLETED, got %s", run.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 }
 
 func TestWorkflow_SleepFunction(t *testing.T) {
@@ -417,26 +341,20 @@ def main(ctx, input):
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "zzz"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
 	worker.ProcessOnce(context.Background()) // should yield
 
 	run, _ := store.GetRun(runID)
-	if run.Status != starflow.RunStatusWaiting {
-		t.Fatalf("expected WAITING, got %s", run.Status)
-	}
+	require.Equal(t, starflow.RunStatusWaiting, run.Status)
 
 	time.Sleep(50 * time.Millisecond)
 
 	worker.ProcessOnce(context.Background()) // should complete
 
 	run, _ = store.GetRun(runID)
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected COMPLETED, got %s", run.Status)
-	}
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 }
 
 func TestWorkflow_Yield(t *testing.T) {
@@ -460,9 +378,7 @@ def main(ctx, input):
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "yield"})
-	if err != nil {
-		t.Fatalf("workflow run failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	worker := wf.NewWorker(0)
 	// First processing – should hit yield
@@ -470,19 +386,14 @@ def main(ctx, input):
 
 	// Verify status WAITING
 	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
-	if run.Status != starflow.RunStatusWaiting {
-		t.Fatalf("expected WAITING, got %s", run.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusWaiting, run.Status)
 
 	// Find the correlation ID from the last event
 	events, err := store.GetEvents(runID)
 	fmt.Println("events:", events)
-	if err != nil || len(events) == 0 {
-		t.Fatalf("failed to get events: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, events)
 	var cid string
 	for i := len(events) - 1; i >= 0; i-- {
 		if events[i].Type == starflow.EventTypeYield {
@@ -490,25 +401,17 @@ def main(ctx, input):
 			break
 		}
 	}
-	if cid == "" {
-		t.Fatalf("correlation id not found")
-	}
+	require.NotEmpty(t, cid, "correlation id not found")
 
 	// Send signal
-	if err := wf.Signal(context.Background(), cid, &testpb.PingResponse{Message: "done"}); err != nil {
-		t.Fatalf("signal failed: %v", err)
-	}
+	require.NoError(t, wf.Signal(context.Background(), cid, &testpb.PingResponse{Message: "done"}))
 
 	// Process again – should complete
 	worker.ProcessOnce(context.Background())
 
 	run, err = store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
-	}
-	if run.Status != starflow.RunStatusCompleted {
-		t.Errorf("expected COMPLETED after signal, got %s", run.Status)
-	}
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	fmt.Println("events:")
 	for _, e := range events {
