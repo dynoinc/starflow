@@ -17,40 +17,35 @@ type StoreFactory func(t *testing.T) starflow.Store
 // RunStoreSuite runs the complete test suite against a store implementation
 func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Helper()
-
+	s := newStore(t)
 	ctx := t.Context()
+
+	t.Run("CreateRunWithNonExistentScriptHash", func(t *testing.T) {
+		_, err := s.CreateRun(ctx, "non-existent-hash", nil)
+		require.Error(t, err)
+	})
+
 	t.Run("ScriptIdempotent", func(t *testing.T) {
-		s := newStore(t)
 		content := []byte("print('hi')")
-		h1, _ := s.SaveScript(ctx, content)
-		h2, _ := s.SaveScript(ctx, content)
-		if h1 != h2 {
-			t.Fatalf("different hashes")
-		}
-		if got, _ := s.GetScript(t.Context(), h1); string(got) != string(content) {
-			t.Fatalf("content mismatch")
-		}
+		h1, err := s.SaveScript(ctx, content)
+		require.NoError(t, err)
+		h2, err := s.SaveScript(ctx, content)
+		require.NoError(t, err)
+		require.Equal(t, h1, h2)
+		got, err := s.GetScript(t.Context(), h1)
+		require.NoError(t, err)
+		require.Equal(t, string(content), string(got))
 	})
 
 	t.Run("CreateGetRun", func(t *testing.T) {
-		s := newStore(t)
-		id, _ := s.CreateRun(ctx, "hash", nil)
-		run, _ := s.GetRun(ctx, id)
-		if run.ID != id {
-			t.Fatalf("id mismatch")
-		}
-	})
-
-	t.Run("CreateRunWithNonExistentScriptHash", func(t *testing.T) {
-		s := newStore(t)
-		// Note: MemoryStore allows creating runs with non-existent script hashes
-		// This is acceptable behavior for a memory store implementation
-		_, err := s.CreateRun(ctx, "non-existent-hash", nil)
-		require.NoError(t, err, "memory store should allow creating runs with any script hash")
+		id, err := s.CreateRun(ctx, "hash", nil)
+		require.NoError(t, err)
+		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, id, run.ID)
 	})
 
 	t.Run("NextEventID", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
@@ -64,7 +59,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
@@ -80,13 +74,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("RecordEventWithInvalidRunID", func(t *testing.T) {
-		s := newStore(t)
 		_, err := s.RecordEvent(ctx, "non-existent-run-id", 0, starflow.CallEvent{FunctionName: "fn"})
 		require.Error(t, err, "recording event with invalid runID should fail")
 	})
 
 	t.Run("ReturnEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
@@ -105,7 +97,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("YieldEventUpdatesRunToYielded", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
@@ -121,7 +112,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("LeaseClaim", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "x", nil)
 		require.NoError(t, err)
 
@@ -138,7 +128,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimRunWithSameWorkerID", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "x", nil)
 		require.NoError(t, err)
 
@@ -159,7 +148,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimRunWithExpiredLease", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "x", nil)
 		require.NoError(t, err)
 
@@ -170,14 +158,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("SignalWithNonExistentSignalID", func(t *testing.T) {
-		s := newStore(t)
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
-		err := s.Signal(ctx, "non-existent-signal-id", output)
+		output, err := anypb.New(&testpb.PingResponse{Message: "test"})
+		require.NoError(t, err)
+		err = s.Signal(ctx, "non-existent-signal-id", output)
 		require.Error(t, err, "signaling with non-existent signal ID should fail")
 	})
 
 	t.Run("SignalWithNonExistentRunID", func(t *testing.T) {
-		s := newStore(t)
 		// First create a run and yield it to create a signal
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
@@ -204,7 +191,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("SignalTwiceWithSameSignalID", func(t *testing.T) {
-		s := newStore(t)
 		// First create a run and yield it to create a signal
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
@@ -226,7 +212,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("FinishRun", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
@@ -241,11 +226,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ListRuns", func(t *testing.T) {
-		s := newStore(t)
 		// Create multiple runs
-		_, _ = s.CreateRun(ctx, "h1", nil)
-		_, _ = s.CreateRun(ctx, "h2", nil)
-		_, _ = s.CreateRun(ctx, "h3", nil)
+		_, err := s.CreateRun(ctx, "h1", nil)
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, "h2", nil)
+		require.NoError(t, err)
+		_, err = s.CreateRun(ctx, "h3", nil)
+		require.NoError(t, err)
 
 		// Test listing all runs
 		runs, err := s.ListRuns(ctx)
@@ -269,7 +256,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("GetEvents", func(t *testing.T) {
-		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 

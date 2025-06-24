@@ -13,6 +13,7 @@ import (
 	"github.com/dynoinc/starflow"
 	"github.com/lib/pq"
 	"github.com/lithammer/shortuuid/v4"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
@@ -130,10 +131,19 @@ func (s *Store) GetScript(ctx context.Context, scriptHash string) ([]byte, error
 func (s *Store) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
 	runID := s.generateID()
 
+	var inputBytes []byte
+	if input != nil {
+		var err error
+		inputBytes, err = proto.Marshal(input)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal input: %w", err)
+		}
+	}
+
 	query := `INSERT INTO runs (id, script_hash, input, status, next_event_id) 
 			  VALUES ($1, $2, $3, $4, $5)`
 
-	_, err := s.db.ExecContext(ctx, query, runID, scriptHash, input, starflow.RunStatusPending, 0)
+	_, err := s.db.ExecContext(ctx, query, runID, scriptHash, inputBytes, starflow.RunStatusPending, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
 	}
@@ -166,7 +176,7 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 	// Convert input bytes to anypb.Any
 	if inputBytes != nil {
 		run.Input = &anypb.Any{}
-		if err := run.Input.Unmarshal(inputBytes); err != nil {
+		if err := proto.Unmarshal(inputBytes, run.Input); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal input: %w", err)
 		}
 	}
@@ -174,7 +184,7 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 	// Convert output bytes to anypb.Any
 	if outputBytes != nil {
 		run.Output = &anypb.Any{}
-		if err := run.Output.Unmarshal(outputBytes); err != nil {
+		if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal output: %w", err)
 		}
 	}
@@ -231,7 +241,7 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 		// Convert input bytes to anypb.Any
 		if inputBytes != nil {
 			run.Input = &anypb.Any{}
-			if err := run.Input.Unmarshal(inputBytes); err != nil {
+			if err := proto.Unmarshal(inputBytes, run.Input); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal input: %w", err)
 			}
 		}
@@ -239,7 +249,7 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 		// Convert output bytes to anypb.Any
 		if outputBytes != nil {
 			run.Output = &anypb.Any{}
-			if err := run.Output.Unmarshal(outputBytes); err != nil {
+			if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal output: %w", err)
 			}
 		}
@@ -378,12 +388,18 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 	}
 
 	// Insert resume event
-	outputBytes, err := output.Marshal()
+	outputBytes, err := proto.Marshal(output)
 	if err != nil {
 		return fmt.Errorf("failed to marshal output: %w", err)
 	}
 
-	resumeEvent := starflow.ResumeEvent{SignalID: cid, Output: output}
+	// Create a new anypb.Any from the marshaled bytes for the resume event
+	resumeOutput := &anypb.Any{}
+	if err := proto.Unmarshal(outputBytes, resumeOutput); err != nil {
+		return fmt.Errorf("failed to unmarshal output for resume event: %w", err)
+	}
+
+	resumeEvent := starflow.ResumeEvent{SignalID: cid, Output: resumeOutput}
 	metadataBytes, err := json.Marshal(resumeEvent)
 	if err != nil {
 		return fmt.Errorf("failed to marshal resume event: %w", err)
@@ -455,7 +471,7 @@ func (s *Store) GetEvents(ctx context.Context, runID string) ([]*starflow.Event,
 
 // FinishRun updates the output of a run
 func (s *Store) FinishRun(ctx context.Context, runID string, output *anypb.Any) error {
-	outputBytes, err := output.Marshal()
+	outputBytes, err := proto.Marshal(output)
 	if err != nil {
 		return fmt.Errorf("failed to marshal output: %w", err)
 	}
