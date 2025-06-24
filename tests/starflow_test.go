@@ -20,14 +20,14 @@ func TestWorkflow(t *testing.T) {
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
 	}
-	starflow.Register(wf, pingFn, starflow.WithName("pingFn"))
+	starflow.Register(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
 
 	script := `
 load("proto", "proto")
 
 def main(ctx, input):
 	ping_proto = proto.file("ping.proto")
-	output = pingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	output = starflow_test.pingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 	return output
 `
 
@@ -48,7 +48,7 @@ def main(ctx, input):
 	require.Len(t, events, 2)
 	require.Equal(t, starflow.EventTypeCall, events[0].Type)
 	if callEvent, ok := events[0].AsCallEvent(); ok {
-		require.Equal(t, "pingFn", callEvent.FunctionName)
+		require.Equal(t, "starflow_test.pingFn", callEvent.FunctionName)
 	}
 	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
 	if returnEvent, ok := events[1].AsReturnEvent(); ok {
@@ -72,8 +72,8 @@ func TestWorkflow_ReplaySupport(t *testing.T) {
 		return &testpb.PingResponse{Message: "DB result for: " + req.Message}, nil
 	}
 
-	starflow.Register(wf, httpCallFn, starflow.WithName("httpCallFn"))
-	starflow.Register(wf, dbQueryFn, starflow.WithName("dbQueryFn"))
+	starflow.Register(wf, httpCallFn, starflow.WithName("starflow_test.httpCallFn"))
+	starflow.Register(wf, dbQueryFn, starflow.WithName("starflow_test.dbQueryFn"))
 
 	script := `
 load("proto", "proto")
@@ -86,12 +86,12 @@ def main(ctx, input):
 	
 	# Make an HTTP call
 	http_req = ping_proto.PingRequest(message="http_" + input.message)
-	http_resp = httpCallFn(ctx=ctx, req=http_req)
+	http_resp = starflow_test.httpCallFn(ctx=ctx, req=http_req)
 	print("HTTP response:", http_resp.message)
 	
 	# Query the database
 	db_req = ping_proto.PingRequest(message="db_" + input.message)
-	db_resp = dbQueryFn(ctx=ctx, req=db_req)
+	db_resp = starflow_test.dbQueryFn(ctx=ctx, req=db_req)
 	print("DB response:", db_resp.message)
 	
 	# Return final result
@@ -121,7 +121,7 @@ def main(ctx, input):
 
 	require.Equal(t, 4, len(events))
 
-	expectedFunctions := []string{"httpCallFn", "httpCallFn", "dbQueryFn", "dbQueryFn"}
+	expectedFunctions := []string{"starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn"}
 	expectedTypes := []starflow.EventType{
 		starflow.EventTypeCall, starflow.EventTypeReturn,
 		starflow.EventTypeCall, starflow.EventTypeReturn,
@@ -149,7 +149,7 @@ func TestWorkflow_StarlarkMathImport(t *testing.T) {
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
 	}
-	starflow.Register(wf, pingFn, starflow.WithName("pingFn"))
+	starflow.Register(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
 
 	script := `
 load("proto", "proto")
@@ -192,14 +192,14 @@ func TestWorkflow_RetryPolicy(t *testing.T) {
 	}
 
 	policy := backoff.WithMaxRetries(backoff.NewConstantBackOff(1*time.Millisecond), 3)
-	starflow.Register(wf, flakyFn, starflow.WithName("flakyFn"), starflow.WithRetryPolicy(policy))
+	starflow.Register(wf, flakyFn, starflow.WithName("starflow_test.flakyFn"), starflow.WithRetryPolicy(policy))
 
 	script := `
 load("proto", "proto")
 
 def main(ctx, input):
 	ping_proto = proto.file("ping.proto")
-	return flakyFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return starflow_test.flakyFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
@@ -258,14 +258,14 @@ func TestWorkflow_Failure(t *testing.T) {
 	failingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return nil, fmt.Errorf("intentional failure: %s", req.Message)
 	}
-	starflow.Register(wf, failingFn, starflow.WithName("failingFn"))
+	starflow.Register(wf, failingFn, starflow.WithName("starflow_test.failingFn"))
 
 	script := `
 load("proto", "proto")
 
 def main(ctx, input):
 	ping_proto = proto.file("ping.proto")
-	return failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return starflow_test.failingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
@@ -300,13 +300,13 @@ def main(ctx, input):
 	// First event should be the function call
 	require.Equal(t, starflow.EventTypeCall, events[0].Type)
 	if callEvent, ok := events[0].AsCallEvent(); ok {
-		require.Equal(t, "failingFn", callEvent.FunctionName)
+		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName)
 	}
 
 	// Second event should be the return with error
 	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
 	if callEvent, ok := events[1].AsCallEvent(); ok {
-		require.Equal(t, "failingFn", callEvent.FunctionName)
+		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName)
 	}
 	if returnEvent, ok := events[1].AsReturnEvent(); ok {
 		require.Error(t, returnEvent.Error)
@@ -317,4 +317,42 @@ def main(ctx, input):
 	t.Logf("Run ID: %s", runID)
 	t.Logf("Status: %s", run.Status)
 	t.Logf("Error: %s", run.Error)
+}
+
+func PingPong(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+	return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
+}
+
+func TestWorkflow_FullPackagePath(t *testing.T) {
+	store := NewMemoryStore(t)
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+
+	starflow.Register(wf, PingPong)
+	for _, name := range wf.RegisteredNames() {
+		t.Logf("Registered: %s", name)
+	}
+
+	script := `
+load("proto", "proto")
+
+def main(ctx, input):
+	ping_proto = proto.file("ping.proto")
+	output = tests_test.PingPong(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return output
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
+	require.NoError(t, err)
+
+	wf.ProcessOnce(t.Context())
+
+	run, err := client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+
+	var outputResp testpb.PingResponse
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
+	require.Equal(t, "pong: test", outputResp.Message)
 }

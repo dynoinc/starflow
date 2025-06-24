@@ -29,8 +29,13 @@ type registeredFn struct {
 type Option func(*registeredFn)
 
 // WithName overrides the automatically derived name for the function.
+// The name must be in the format "module.funcname".
 func WithName(name string) Option {
 	return func(rf *registeredFn) {
+		// Validate that the name is in the correct format
+		if !strings.Contains(name, ".") {
+			panic(fmt.Sprintf("function name must be in format 'module.funcname', got: %s", name))
+		}
 		rf.name = name
 	}
 }
@@ -110,13 +115,24 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 	}
 
 	if reg.name == "" {
-		// Use reflection to get function name
 		funcValue := reflect.ValueOf(fn)
 		funcName := runtime.FuncForPC(funcValue.Pointer()).Name()
-
-		// Extract just the function name (remove package path)
+		pkgPath := reflect.TypeOf(fn).PkgPath()
+		pkgParts := strings.Split(pkgPath, "/")
+		moduleName := pkgParts[len(pkgParts)-1]
 		parts := strings.Split(funcName, ".")
-		reg.name = parts[len(parts)-1]
+		functionName := parts[len(parts)-1]
+		// Fallback: if moduleName is empty, get the segment before the function name in funcName
+		if moduleName == "" && len(parts) > 1 {
+			moduleName = parts[len(parts)-2]
+		}
+		// If moduleName still contains path segments, get just the last part
+		if strings.Contains(moduleName, "/") {
+			moduleParts := strings.Split(moduleName, "/")
+			moduleName = moduleParts[len(moduleParts)-1]
+		}
+		reg.name = moduleName + "." + functionName
+		fmt.Printf("REGISTERED: %s (pkg: %s, func: %s)\n", reg.name, moduleName, functionName)
 	}
 
 	w.registry[reg.name] = reg
@@ -164,4 +180,13 @@ func (w *Worker[Input, Output]) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// RegisteredNames returns the registered function names (for testing/debugging)
+func (w *Worker[Input, Output]) RegisteredNames() []string {
+	names := make([]string, 0, len(w.registry))
+	for name := range w.registry {
+		names = append(names, name)
+	}
+	return names
 }

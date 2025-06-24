@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
@@ -44,11 +45,58 @@ func (t *thread[Input, Output]) createOutputInstance() Output {
 	return reflect.New(outputType).Interface().(Output)
 }
 
+// starlarkModule represents a module in Starlark
+type starlarkModule struct {
+	name    string
+	members starlark.StringDict
+}
+
+func (m *starlarkModule) String() string        { return fmt.Sprintf("<module %s>", m.name) }
+func (m *starlarkModule) Type() string          { return "module" }
+func (m *starlarkModule) Freeze()               { m.members.Freeze() }
+func (m *starlarkModule) Truth() starlark.Bool  { return starlark.True }
+func (m *starlarkModule) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: module") }
+
+// Attr returns the value of the specified attribute
+func (m *starlarkModule) Attr(name string) (starlark.Value, error) {
+	if value, ok := m.members[name]; ok {
+		return value, nil
+	}
+	return nil, nil // Return nil for missing attributes
+}
+
+// AttrNames returns the names of all attributes
+func (m *starlarkModule) AttrNames() []string {
+	names := make([]string, 0, len(m.members))
+	for name := range m.members {
+		names = append(names, name)
+	}
+	return names
+}
+
 func (t *thread[Input, Output]) globals() (starlark.StringDict, error) {
 	globals := make(starlark.StringDict)
+
+	// Group functions by module
+	modules := make(map[string]starlark.StringDict)
+
 	for name, regFn := range t.w.registry {
-		globals[name] = wrapFn(t, regFn)
+		parts := strings.Split(name, ".")
+		moduleName := parts[0]
+		funcName := parts[1]
+
+		if modules[moduleName] == nil {
+			modules[moduleName] = make(starlark.StringDict)
+		}
+		modules[moduleName][funcName] = wrapFn(t, regFn)
 	}
+
+	// Add modules to globals
+	for moduleName, moduleDict := range modules {
+		moduleDict.Freeze()
+		globals[moduleName] = &starlarkModule{name: moduleName, members: moduleDict}
+	}
+
 	return globals, nil
 }
 

@@ -14,7 +14,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 	t.Helper()
 
 	ctx := t.Context()
-	t.Run("SaveScript_Idempotent", func(t *testing.T) {
+	t.Run("ScriptIdempotent", func(t *testing.T) {
 		s := newStore(t)
 		content := []byte("print('hi')")
 		h1, _ := s.SaveScript(ctx, content)
@@ -36,7 +36,7 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		}
 	})
 
-	t.Run("RecordEvent_UpdateNextEventID", func(t *testing.T) {
+	t.Run("NextEventID", func(t *testing.T) {
 		s := newStore(t)
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
