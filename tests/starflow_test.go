@@ -3,7 +3,6 @@ package starflow_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -14,17 +13,7 @@ import (
 )
 
 func TestWorkflow(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -99,17 +88,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_Resume(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	// --- First run: Fails during baking ---
 	bakingShouldFail := true
@@ -220,17 +199,7 @@ def main(ctx, input):
 // TestWorkflowLibraryUsage demonstrates how to use the starflow library.
 func TestWorkflowLibraryUsage(t *testing.T) {
 	// Step 1: Create a temporary database for workflow storage
-	f, err := os.CreateTemp("", "starflow-example-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	// Step 3: Create the workflow and register functions
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
@@ -339,17 +308,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_StarlarkMathImport(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-math-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -392,17 +351,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_RetryPolicy(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-retry-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -448,17 +397,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_SleepFunction(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-sleep-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -495,17 +434,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_Yield(t *testing.T) {
-	f, err := os.CreateTemp("", "starflow-yield-*.db")
-	if err != nil {
-		t.Fatalf("failed to create temp file: %v", err)
-	}
-	defer os.Remove(f.Name())
-	f.Close()
-
-	store, err := starflow.NewSQLiteStore(f.Name())
-	if err != nil {
-		t.Fatalf("failed to create store: %v", err)
-	}
+	store := NewSQLiteStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 

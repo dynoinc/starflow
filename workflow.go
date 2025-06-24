@@ -293,7 +293,7 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 	}
 
 	eventHistory := w.buildEventHistory(resumeEvents)
-	globals, err := w.buildGlobals(ctx, runID, eventHistory)
+	globals, err := w.buildGlobals(runID, eventHistory)
 	if err != nil {
 		w.store.UpdateRunStatus(ctx, runID, RunStatusFailed)
 		return zero, fmt.Errorf("failed to build globals: %w", err)
@@ -410,7 +410,7 @@ func (w *Workflow[Input, Output]) buildEventHistory(events []*Event) map[string]
 	return history
 }
 
-func (w *Workflow[Input, Output]) buildGlobals(ctx context.Context, runID string, history map[string]*Event) (starlark.StringDict, error) {
+func (w *Workflow[Input, Output]) buildGlobals(runID string, history map[string]*Event) (starlark.StringDict, error) {
 	globals := make(starlark.StringDict)
 	for name, regFn := range w.registry {
 		var historicalEvent *Event
