@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // ErrConcurrentUpdate indicates optimistic concurrency failure.
@@ -20,10 +22,10 @@ type Store interface {
 	// Runs
 	//
 	// Methods to create/introspect/claim runs.
-	CreateRun(ctx context.Context, scriptHash string, input []byte) (string, error)
+	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error)
-	FinishRun(ctx context.Context, runID string, output []byte) error
+	FinishRun(ctx context.Context, runID string, output *anypb.Any) error
 	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
 
 	// Events

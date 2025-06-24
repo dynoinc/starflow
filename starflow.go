@@ -25,7 +25,7 @@ type Run struct {
 	// Fixed on creation
 	ID         string
 	ScriptHash string
-	Input      []byte
+	Input      *anypb.Any
 	CreatedAt  time.Time
 
 	// Updated at each event
@@ -34,7 +34,7 @@ type Run struct {
 	UpdatedAt   time.Time
 
 	// Set when finished.
-	Output []byte
+	Output *anypb.Any
 	Error  error
 
 	// Set when claimed by a worker

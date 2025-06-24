@@ -11,6 +11,7 @@ import (
 
 	"github.com/dynoinc/starflow"
 	"github.com/lithammer/shortuuid/v4"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // MemoryStore is an in-memory implementation of the Store interface.
@@ -55,7 +56,7 @@ func (s *MemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byte,
 }
 
 // CreateRun creates a new run record for a given script.
-func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input []byte) (string, error) {
+func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
 	runID := shortuuid.New()
 	now := time.Now()
 
@@ -186,7 +187,7 @@ func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.
 }
 
 // FinishRun updates the output of a run and typically sets status to COMPLETED.
-func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output []byte) error {
+func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output *anypb.Any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

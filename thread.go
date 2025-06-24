@@ -133,11 +133,11 @@ func runThread[Input proto.Message, Output proto.Message](
 	}
 	t.events = events
 
-	// Unmarshal the input from bytes
+	// Unmarshal the input from anypb.Any
 	var input Input
-	if len(run.Input) > 0 {
+	if run.Input != nil {
 		input = t.createInputInstance()
-		if err := proto.Unmarshal(run.Input, input); err != nil {
+		if err := run.Input.UnmarshalTo(input); err != nil {
 			return zero, fmt.Errorf("failed to unmarshal run input: %w", err)
 		}
 	}
@@ -211,12 +211,12 @@ func runThread[Input proto.Message, Output proto.Message](
 		proto.Merge(output, pm.ProtoReflect().Interface())
 	}
 
-	outputBytes, err := proto.Marshal(output)
+	outputAny, err := anypb.New(output)
 	if err != nil {
-		return zero, fmt.Errorf("failed to marshal output: %w", err)
+		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := t.w.store.FinishRun(ctx, t.run.ID, outputBytes); err != nil {
+	if err := t.w.store.FinishRun(ctx, t.run.ID, outputAny); err != nil {
 		return zero, fmt.Errorf("failed to update run output: %w", err)
 	}
 

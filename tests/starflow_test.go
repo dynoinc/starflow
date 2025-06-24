@@ -10,7 +10,6 @@ import (
 	"github.com/dynoinc/starflow"
 	testpb "github.com/dynoinc/starflow/tests/proto"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
 )
 
 func TestWorkflow(t *testing.T) {
@@ -57,7 +56,7 @@ def main(ctx, input):
 	}
 
 	var outputResp testpb.PingResponse
-	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
 	require.Equal(t, "pong: hello", outputResp.Message)
 }
 
@@ -109,7 +108,7 @@ def main(ctx, input):
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	var outputResp testpb.PingResponse
-	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
 
 	expectedMessage := "Completed: HTTP response simulated + DB result for: db_example"
 	require.Equal(t, expectedMessage, outputResp.Message)
@@ -173,7 +172,7 @@ def main(ctx, input):
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	var outputResp testpb.PingResponse
-	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
 
 	require.Contains(t, []string{"4", "4.0"}, outputResp.Message)
 }
@@ -215,6 +214,15 @@ def main(ctx, input):
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+
+	// Debug output
+	t.Logf("Run Status: %s", run.Status)
+	t.Logf("Run Error: %s", run.Error)
+	if run.Output != nil {
+		t.Logf("Run Output: present")
+	} else {
+		t.Logf("Run Output: nil")
+	}
 }
 
 func TestWorkflow_SleepFunction(t *testing.T) {
@@ -274,7 +282,11 @@ def main(ctx, input):
 	// Debug output
 	t.Logf("Run Status: %s", run.Status)
 	t.Logf("Run Error: %s", run.Error)
-	t.Logf("Run Output length: %d", len(run.Output))
+	if run.Output != nil {
+		t.Logf("Run Output: present")
+	} else {
+		t.Logf("Run Output: nil")
+	}
 
 	require.Equal(t, starflow.RunStatusFailed, run.Status)
 	require.Error(t, run.Error)

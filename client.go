@@ -8,6 +8,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type Client[Input proto.Message] struct {
@@ -31,18 +32,18 @@ func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (st
 		return "", fmt.Errorf("failed to save script: %w", err)
 	}
 
-	// Marshal input
-	var inputBytes []byte
+	// Convert input to anypb.Any
+	var inputAny *anypb.Any
 	inputVal := reflect.ValueOf(input)
 	if !inputVal.IsNil() {
-		inputBytes, err = proto.Marshal(input)
+		inputAny, err = anypb.New(input)
 		if err != nil {
-			return "", fmt.Errorf("failed to marshal input: %w", err)
+			return "", fmt.Errorf("failed to convert input to anypb.Any: %w", err)
 		}
 	}
 
 	// Create run
-	runID, err := c.store.CreateRun(ctx, scriptHash, inputBytes)
+	runID, err := c.store.CreateRun(ctx, scriptHash, inputAny)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
 	}
