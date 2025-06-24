@@ -139,29 +139,32 @@ func (s *MemoryStore) ClaimRun(ctx context.Context, runID string, workerID strin
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 // On success the store increments NextEventID by one.
-func (s *MemoryStore) RecordEvent(ctx context.Context, run *starflow.Run, event *starflow.Event) error {
+func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, event *starflow.Event) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storedRun, exists := s.runs[run.ID]
+	storedRun, exists := s.runs[runID]
 	if !exists {
-		return fmt.Errorf("run with ID %s not found", run.ID)
+		return 0, fmt.Errorf("run with ID %s not found", runID)
 	}
 
 	// Check optimistic concurrency precondition
-	if storedRun.NextEventID != run.NextEventID {
-		return starflow.ErrConcurrentUpdate
+	if storedRun.NextEventID != nextEventID {
+		return 0, starflow.ErrConcurrentUpdate
 	}
 
 	// Add event to the list
-	s.events[run.ID] = append(s.events[run.ID], event)
+	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
-	run.NextEventID++
-	run.UpdatedAt = time.Now()
+	if event.Type == starflow.EventTypeReturn && event.Error != "" {
+		storedRun.Status = starflow.RunStatusFailed
+		storedRun.Error = event.Error
+	}
+
 	storedRun.NextEventID++
 	storedRun.UpdatedAt = time.Now()
-	return nil
+	return storedRun.NextEventID, nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
@@ -180,8 +183,8 @@ func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.
 	return result, nil
 }
 
-// UpdateRunOutput updates the output of a run and typically sets status to COMPLETED.
-func (s *MemoryStore) UpdateRun(ctx context.Context, runID string, output []byte, err error) error {
+// FinishRun updates the output of a run and typically sets status to COMPLETED.
+func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -190,71 +193,9 @@ func (s *MemoryStore) UpdateRun(ctx context.Context, runID string, output []byte
 		return fmt.Errorf("run with ID %s not found", runID)
 	}
 
-	if err != nil {
-		run.Error = err.Error()
-		run.Status = starflow.RunStatusFailed
-	} else {
-		run.Output = output
-		run.Status = starflow.RunStatusCompleted
-	}
-
+	run.Output = output
+	run.Status = starflow.RunStatusCompleted
 	run.UpdatedAt = time.Now()
-
-	return nil
-}
-
-// UpdateRunError sets the error message for a run.
-func (s *MemoryStore) UpdateRunError(ctx context.Context, runID string, errMsg string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	run, exists := s.runs[runID]
-	if !exists {
-		return fmt.Errorf("run with ID %s not found", runID)
-	}
-
-	run.Error = errMsg
-	run.Status = starflow.RunStatusFailed
-	run.UpdatedAt = time.Now()
-
-	return nil
-}
-
-// RecordEventAndUpdateStatus performs the following atomically in a single transaction:
-//  1. Insert the supplied event (if not nil)
-//  2. Update the run's status to the supplied value (if status != "")
-func (s *MemoryStore) RecordEventAndUpdateStatus(ctx context.Context, runID string, expectedNextID int, event *starflow.Event, status starflow.RunStatus) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	run, exists := s.runs[runID]
-	if !exists {
-		return fmt.Errorf("run with ID %s not found", runID)
-	}
-
-	// Check optimistic concurrency precondition if event is provided
-	if event != nil && run.NextEventID != expectedNextID {
-		return starflow.ErrConcurrentUpdate
-	}
-
-	// Update status if provided
-	if status != "" {
-		run.Status = status
-		// Clear lease when status changes to PENDING (after a RESUME)
-		if status == starflow.RunStatusPending {
-			run.WorkerID = ""
-			run.LeaseUntil = nil
-		}
-	}
-
-	// Add event if provided
-	if event != nil {
-		s.events[runID] = append(s.events[runID], event)
-		run.NextEventID++
-	}
-
-	run.UpdatedAt = time.Now()
-
 	return nil
 }
 

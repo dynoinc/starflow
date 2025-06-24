@@ -266,6 +266,12 @@ def main(ctx, input):
 	// Fetch run output and verify it failed
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
+
+	// Debug output
+	t.Logf("Run Status: %s", run.Status)
+	t.Logf("Run Error: %s", run.Error)
+	t.Logf("Run Output length: %d", len(run.Output))
+
 	require.Equal(t, starflow.RunStatusFailed, run.Status)
 	require.NotEmpty(t, run.Error)
 	require.Contains(t, run.Error, "intentional failure: should fail")

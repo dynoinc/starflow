@@ -43,12 +43,12 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.Equal(t, 0, run.NextEventID)
+		require.Equal(t, int64(0), run.NextEventID)
 
 		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
-		err = s.RecordEvent(ctx, run, evt)
+		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, evt)
 		require.NoError(t, err)
-		require.Equal(t, 1, run.NextEventID)
+		require.Equal(t, int64(1), nextEventID)
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
@@ -56,16 +56,14 @@ func runStoreSuite(t *testing.T, newStore storeFactory) {
 		id, err := s.CreateRun(ctx, "h", nil)
 		require.NoError(t, err)
 
-		run1, err := s.GetRun(ctx, id)
-		require.NoError(t, err)
-		run2, err := s.GetRun(ctx, id)
+		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
 		evt := &starflow.Event{Timestamp: time.Now(), Type: starflow.EventTypeCall, FunctionName: "fn"}
-		err = s.RecordEvent(ctx, run1, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
 		require.NoError(t, err)
 
-		err = s.RecordEvent(ctx, run2, evt)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, evt)
 		require.Error(t, err)
 		require.Equal(t, err, starflow.ErrConcurrentUpdate)
 	})

@@ -192,7 +192,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to marshal output: %w", err)
 	}
 
-	if err := t.w.store.UpdateRun(ctx, t.run.ID, outputBytes, nil); err != nil {
+	if err := t.w.store.FinishRun(ctx, t.run.ID, outputBytes); err != nil {
 		return zero, fmt.Errorf("failed to update run output: %w", err)
 	}
 
@@ -259,14 +259,17 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("expected input to be %v, got %v", expectedProto, req)
 			}
 		} else {
-			if err := t.w.store.RecordEvent(ctx, t.run, &Event{
+			nextEventID, err := t.w.store.RecordEvent(ctx, t.run.ID, t.run.NextEventID, &Event{
 				Timestamp:    time.Now(),
 				Type:         EventTypeCall,
 				FunctionName: regFn.name,
 				Input:        inputBytes,
-			}); err != nil {
+			})
+			if err != nil {
 				return starlark.None, fmt.Errorf("failed to record call event: %w", err)
 			}
+
+			t.run.NextEventID = nextEventID
 		}
 
 		if len(t.events) > 0 {
@@ -325,20 +328,33 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		} else {
 			callErr = callFunc()
 		}
+
 		if callErr != nil {
 			event.Error = callErr.Error()
 			wrapFnSpan.SetStatus(codes.Error, callErr.Error())
-		} else {
-			wrapFnSpan.SetStatus(codes.Ok, "success")
-			event.Output, err = proto.Marshal(resp)
+
+			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, event)
 			if err != nil {
-				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
+				return starlark.None, fmt.Errorf("failed to record return event: %w", err)
 			}
+			t.run.NextEventID = nextEventID
+
+			// Return the error to propagate it to the Starlark execution
+			return starlark.None, callErr
 		}
 
-		if err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run, event); err != nil {
+		// Success case
+		wrapFnSpan.SetStatus(codes.Ok, "success")
+		event.Output, err = proto.Marshal(resp)
+		if err != nil {
+			return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, event)
+		if err != nil {
 			return starlark.None, fmt.Errorf("failed to record return event: %w", err)
 		}
+		t.run.NextEventID = nextEventID
 
 		return starlarkproto.MakeMessage(resp), nil
 	})

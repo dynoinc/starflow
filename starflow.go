@@ -28,7 +28,7 @@ type Run struct {
 
 	// Updated at each event
 	Status      RunStatus
-	NextEventID int
+	NextEventID int64
 	UpdatedAt   time.Time
 
 	// Set when finished.
