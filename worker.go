@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"reflect"
 	"runtime"
 	"strings"
@@ -115,24 +116,10 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 	}
 
 	if reg.name == "" {
-		funcValue := reflect.ValueOf(fn)
-		funcName := runtime.FuncForPC(funcValue.Pointer()).Name()
-		pkgPath := reflect.TypeOf(fn).PkgPath()
-		pkgParts := strings.Split(pkgPath, "/")
-		moduleName := pkgParts[len(pkgParts)-1]
-		parts := strings.Split(funcName, ".")
-		functionName := parts[len(parts)-1]
-		// Fallback: if moduleName is empty, get the segment before the function name in funcName
-		if moduleName == "" && len(parts) > 1 {
-			moduleName = parts[len(parts)-2]
-		}
-		// If moduleName still contains path segments, get just the last part
-		if strings.Contains(moduleName, "/") {
-			moduleParts := strings.Split(moduleName, "/")
-			moduleName = moduleParts[len(moduleParts)-1]
-		}
-		reg.name = moduleName + "." + functionName
-		fmt.Printf("REGISTERED: %s (pkg: %s, func: %s)\n", reg.name, moduleName, functionName)
+		full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+		function := strings.TrimPrefix(path.Ext(full), ".")
+		module := path.Base(strings.TrimSuffix(full, path.Ext(full)))
+		reg.name = module + "." + function
 	}
 
 	w.registry[reg.name] = reg
