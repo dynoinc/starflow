@@ -25,6 +25,32 @@ import (
 // ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
 var ErrYield = errors.New("workflow yielded")
 
+// YieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
+type YieldError struct {
+	cid string
+}
+
+func (y YieldError) Error() string { return ErrYield.Error() }
+
+// Is allows errors.Is(err, ErrYield) to work.
+func (y YieldError) Is(target error) bool {
+	return target == ErrYield
+}
+
+// CorrelationID returns the associated correlation id.
+func (y YieldError) CorrelationID() string { return y.cid }
+
+// Yield creates a new correlation id and returns an error sentinel that callers can return
+// from their registered function to pause the workflow.
+// Usage:
+//
+//	cid, err := starflow.Yield()
+//	return nil, err
+func Yield() (string, error) {
+	cid := shortuuid.New()[:8]
+	return cid, YieldError{cid: cid}
+}
+
 type registeredFn struct {
 	fn          func(ctx context.Context, req proto.Message) (proto.Message, error)
 	reqType     proto.Message
@@ -249,7 +275,12 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 				}, nil
 			}
 			if module == "time" {
-				return starlarktime.Module.Members, nil
+				members := make(starlark.StringDict)
+				for k, v := range starlarktime.Module.Members {
+					members[k] = v
+				}
+				members["sleep"] = w.makeSleepBuiltin(runID)
+				return members, nil
 			}
 			if module == "math" {
 				return math.Module.Members, nil
@@ -462,7 +493,13 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 
 		// Handle yield sentinel separately
 		if errors.Is(err, ErrYield) {
-			cid := shortuuid.New()[:8]
+			var cid string
+			if yerr, ok := err.(interface{ CorrelationID() string }); ok {
+				cid = yerr.CorrelationID()
+			}
+			if cid == "" {
+				cid = shortuuid.New()[:8] // fallback, should not normally happen
+			}
 			if recErr := w.store.RecordEvent(runID, &Event{
 				Timestamp:     time.Now(),
 				Type:          EventTypeYield,
@@ -476,7 +513,7 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			if errStatus := w.store.UpdateRunStatus(ctx, runID, RunStatusWaiting); errStatus != nil {
 				return nil, errStatus
 			}
-			return nil, ErrYield
+			return nil, err
 		}
 
 		// Marshal response if present
@@ -509,13 +546,78 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 	})
 }
 
+// makeSleepBuiltin returns a starlark builtin implementing durable sleep.
+func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Builtin {
+	return starlark.NewBuiltin("sleep", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
+		var ctxVal starlark.Value
+		var durationVal starlark.Value
+		if err := starlark.UnpackArgs("sleep", args, kwargs, "ctx", &ctxVal, "duration", &durationVal); err != nil {
+			return nil, err
+		}
+
+		starlarkCtx, ok := ctxVal.(*starlarkContext)
+		if !ok {
+			return nil, fmt.Errorf("first argument must be context")
+		}
+
+		// If this run was previously sleeping and wake time already passed, just return immediately.
+		run, _ := w.store.GetRun(runID)
+		if run != nil {
+			if run.WakeAt == nil || time.Now().After(*run.WakeAt) {
+				return starlark.None, nil
+			}
+		}
+
+		// duration in milliseconds
+		var durMs int64
+		switch v := durationVal.(type) {
+		case starlark.Int:
+			if i, ok := v.Int64(); ok {
+				durMs = i
+			} else {
+				return nil, fmt.Errorf("duration too big")
+			}
+		default:
+			return nil, fmt.Errorf("duration must be int milliseconds")
+		}
+
+		wake := time.Now().Add(time.Duration(durMs) * time.Millisecond)
+
+		// get correlation id via helper
+		cid := shortuuid.New()[:8]
+
+		// Persist yield event
+		if recErr := w.store.RecordEvent(runID, &Event{
+			Timestamp:     time.Now(),
+			Type:          EventTypeYield,
+			FunctionName:  "time.sleep",
+			CorrelationID: cid,
+		}); recErr != nil {
+			return nil, recErr
+		}
+
+		// Set wake_at and status
+		if err := w.store.UpdateRunWakeUp(starlarkCtx.ctx, runID, &wake); err != nil {
+			return nil, err
+		}
+		if err := w.store.UpdateRunStatus(starlarkCtx.ctx, runID, RunStatusWaiting); err != nil {
+			return nil, err
+		}
+
+		// Return yield error
+		yerr := YieldError{cid: cid}
+		return nil, yerr
+	})
+}
+
 // Signal delivers an external response to a previously yielded function call, identified by its correlation ID.
-func (w *Workflow[Input, Output]) Signal(ctx context.Context, runID string, correlationID string, resp proto.Message) error {
-	// Fetch the corresponding yield event to validate existence
-	yieldEvent, err := w.store.GetEventByCorrelationID(runID, correlationID)
+func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID string, resp proto.Message) error {
+	// Locate event and run
+	runID, yieldEvent, err := w.store.FindEventByCorrelationID(correlationID)
 	if err != nil {
 		return err
 	}
+
 	if yieldEvent.Type != EventTypeYield {
 		return fmt.Errorf("correlation id %s is not a yield event", correlationID)
 	}
@@ -535,6 +637,9 @@ func (w *Workflow[Input, Output]) Signal(ctx context.Context, runID string, corr
 		return err
 	}
 
-	// Mark the run as ready to continue
+	// clear wake_at if any
+	_ = w.store.UpdateRunWakeUp(ctx, runID, nil)
+
+	// Mark run ready
 	return w.store.UpdateRunStatus(ctx, runID, RunStatusPending)
 }

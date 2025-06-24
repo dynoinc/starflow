@@ -21,13 +21,24 @@ func (w *Workflow[Input, Output]) NewWorker(poll time.Duration) *Worker[Input, O
 	return &Worker[Input, Output]{wf: w, poll: poll}
 }
 
-// ProcessOnce processes all runs that are in PENDING state exactly once.
+// ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 func (wk *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	runs, err := wk.wf.store.ListRuns(ctx, RunStatusPending)
+	now := time.Now()
+	runs, err := wk.wf.store.ListRuns(ctx, RunStatusPending, RunStatusWaiting)
 	if err != nil {
 		return
 	}
 	for _, r := range runs {
+		// If waiting, ensure wake time reached
+		if r.Status == RunStatusWaiting {
+			if r.WakeAt == nil || r.WakeAt.After(now) {
+				continue // not yet
+			}
+			// transition to pending first
+			_ = wk.wf.store.UpdateRunStatus(ctx, r.ID, RunStatusPending)
+			_ = wk.wf.store.UpdateRunWakeUp(ctx, r.ID, nil)
+		}
+
 		// Attempt to claim the run by setting it to RUNNING; ignore if already claimed.
 		if err := wk.wf.store.UpdateRunStatus(ctx, r.ID, RunStatusRunning); err != nil {
 			continue

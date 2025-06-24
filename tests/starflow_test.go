@@ -447,19 +447,13 @@ func TestWorkflow_SleepFunction(t *testing.T) {
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
-	sleepFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		time.Sleep(10 * time.Millisecond)
-		return &testpb.PingResponse{Message: "slept"}, nil
-	}
-
-	starflow.Register(wf, sleepFn, starflow.WithName("sleepFn"))
-
 	script := `
 load("proto", "proto")
+load("time", "sleep")
 
 def main(ctx, input):
-	ping_proto = proto.file("ping.proto")
-	return sleepFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	sleep(ctx=ctx, duration=5)  # 5ms durable sleep
+	return proto.file("ping.proto").PingResponse(message="woke")
 `
 
 	runID, err := wf.Run([]byte(script), &testpb.PingRequest{Message: "zzz"})
@@ -468,12 +462,18 @@ def main(ctx, input):
 	}
 
 	worker := wf.NewWorker(0)
-	worker.ProcessOnce(context.Background())
+	worker.ProcessOnce(context.Background()) // should yield
 
-	run, err := store.GetRun(runID)
-	if err != nil {
-		t.Fatalf("failed to get run: %v", err)
+	run, _ := store.GetRun(runID)
+	if run.Status != starflow.RunStatusWaiting {
+		t.Fatalf("expected WAITING, got %s", run.Status)
 	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	worker.ProcessOnce(context.Background()) // should complete
+
+	run, _ = store.GetRun(runID)
 	if run.Status != starflow.RunStatusCompleted {
 		t.Errorf("expected COMPLETED, got %s", run.Status)
 	}
@@ -495,7 +495,8 @@ func TestWorkflow_Yield(t *testing.T) {
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		return nil, starflow.ErrYield
+		_, err := starflow.Yield()
+		return nil, err
 	}
 	starflow.Register(wf, yieldFn, starflow.WithName("yieldFn"))
 
@@ -543,7 +544,7 @@ def main(ctx, input):
 	}
 
 	// Send signal
-	if err := wf.Signal(context.Background(), runID, cid, &testpb.PingResponse{Message: "done"}); err != nil {
+	if err := wf.Signal(context.Background(), cid, &testpb.PingResponse{Message: "done"}); err != nil {
 		t.Fatalf("signal failed: %v", err)
 	}
 

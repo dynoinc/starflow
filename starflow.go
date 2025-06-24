@@ -29,6 +29,7 @@ type Run struct {
 	Output     []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	WakeAt     *time.Time
 }
 
 // EventType represents the type of an event in the execution history.

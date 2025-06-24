@@ -52,6 +52,7 @@ func (s *SQLiteStore) init() error {
 		output BLOB,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
+		wake_at DATETIME,
 		FOREIGN KEY(script_hash) REFERENCES scripts(hash)
 	);
 	CREATE TABLE IF NOT EXISTS events (
@@ -104,8 +105,8 @@ func (s *SQLiteStore) CreateRun(scriptHash string, input []byte) (string, error)
 	now := time.Now()
 
 	_, err := s.db.Exec(
-		"INSERT INTO runs (id, script_hash, input, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		runID, scriptHash, input, RunStatusPending, now, now,
+		"INSERT INTO runs (id, script_hash, input, status, created_at, updated_at, wake_at) VALUES (?, ?, ?, ?, ?, ?, ?) ",
+		runID, scriptHash, input, RunStatusPending, now, now, nil,
 	)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
@@ -119,10 +120,11 @@ func (s *SQLiteStore) GetRun(runID string) (*Run, error) {
 	var run Run
 	var inputBytes, outputBytes []byte
 	var status string
+	var wakeAt sql.NullTime
 	err := s.db.QueryRow(
-		"SELECT id, script_hash, status, input, output, created_at, updated_at FROM runs WHERE id = ?",
+		"SELECT id, script_hash, status, input, output, created_at, updated_at, wake_at FROM runs WHERE id = ?",
 		runID,
-	).Scan(&run.ID, &run.ScriptHash, &status, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt)
+	).Scan(&run.ID, &run.ScriptHash, &status, &inputBytes, &outputBytes, &run.CreatedAt, &run.UpdatedAt, &wakeAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("run with ID %s not found", runID)
@@ -132,6 +134,9 @@ func (s *SQLiteStore) GetRun(runID string) (*Run, error) {
 	run.Status = RunStatus(status)
 	run.Input = inputBytes
 	run.Output = outputBytes
+	if wakeAt.Valid {
+		run.WakeAt = &wakeAt.Time
+	}
 
 	return &run, nil
 }
@@ -205,7 +210,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...RunStatus) ([]*R
 		args[i] = st
 	}
 
-	query := fmt.Sprintf(`SELECT id, script_hash, status, input, output, created_at, updated_at
+	query := fmt.Sprintf(`SELECT id, script_hash, status, input, output, created_at, updated_at, wake_at
 		FROM runs WHERE status IN (%s)`, strings.Join(placeholders, ","))
 
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -218,10 +223,14 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, statuses ...RunStatus) ([]*R
 	for rows.Next() {
 		var run Run
 		var status string
-		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt); err != nil {
+		var wakeAt sql.NullTime
+		if err := rows.Scan(&run.ID, &run.ScriptHash, &status, &run.Input, &run.Output, &run.CreatedAt, &run.UpdatedAt, &wakeAt); err != nil {
 			return nil, err
 		}
 		run.Status = RunStatus(status)
+		if wakeAt.Valid {
+			run.WakeAt = &wakeAt.Time
+		}
 		runs = append(runs, &run)
 	}
 
@@ -242,4 +251,27 @@ func (s *SQLiteStore) GetEventByCorrelationID(runID string, cid string) (*Event,
 	e.Type = EventType(eventType)
 	e.CorrelationID = cid
 	return &e, nil
+}
+
+// FindEventByCorrelationID retrieves event and runID for correlation id.
+func (s *SQLiteStore) FindEventByCorrelationID(cid string) (string, *Event, error) {
+	row := s.db.QueryRow(`SELECT run_id, timestamp, type, function_name, input, output, error FROM events WHERE correlation_id = ? LIMIT 1`, cid)
+	var runID string
+	var e Event
+	var eventType string
+	if err := row.Scan(&runID, &e.Timestamp, &eventType, &e.FunctionName, &e.Input, &e.Output, &e.Error); err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil, fmt.Errorf("correlation id %s not found", cid)
+		}
+		return "", nil, err
+	}
+	e.Type = EventType(eventType)
+	e.CorrelationID = cid
+	return runID, &e, nil
+}
+
+// UpdateRunWakeUp sets or clears the wake_at timestamp for a run.
+func (s *SQLiteStore) UpdateRunWakeUp(ctx context.Context, runID string, wakeAt *time.Time) error {
+	_, err := s.db.ExecContext(ctx, "UPDATE runs SET wake_at = ?, updated_at = ? WHERE id = ?", wakeAt, time.Now(), runID)
+	return err
 }

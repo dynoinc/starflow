@@ -2,6 +2,7 @@ package starflow
 
 import (
 	"context"
+	"time"
 )
 
 // Store is the interface for persisting workflow data.
@@ -36,4 +37,11 @@ type Store interface {
 
 	// GetEventByCorrelationID retrieves an event matching the given correlation ID for the run.
 	GetEventByCorrelationID(runID string, correlationID string) (*Event, error)
+
+	// FindEventByCorrelationID retrieves the first event with the given correlationID across all runs.
+	// It returns the associated runID together with the event.
+	FindEventByCorrelationID(correlationID string) (string, *Event, error)
+
+	// UpdateRunWakeUp sets the wake_at timestamp for the run. Use zero time to clear.
+	UpdateRunWakeUp(ctx context.Context, runID string, wakeAt *time.Time) error
 }
