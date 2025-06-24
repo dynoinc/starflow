@@ -29,8 +29,9 @@ type Store interface {
 	ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error)
 
 	// Events
-	// RecordEvent records an event in the execution history of a run.
-	RecordEvent(runID string, event *Event) error
+	// RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
+	// On success the store increments NextEventID by one.
+	RecordEvent(runID string, expectedNextID int, event *Event) error
 
 	// GetEvents retrieves all events for a specific run, ordered by time.
 	GetEvents(runID string) ([]*Event, error)
@@ -49,5 +50,5 @@ type Store interface {
 	//   1. Insert the supplied event (if not nil)
 	//   2. Update the run's status to the supplied value (if status != "")
 	//   3. Update wake_at timestamp (may be nil to clear)
-	UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, status RunStatus, event *Event, wakeAt *time.Time) error
+	UpdateRunStatusAndRecordEvent(ctx context.Context, runID string, expectedNextID int, status RunStatus, event *Event, wakeAt *time.Time) error
 }

@@ -27,9 +27,6 @@ import (
 // ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
 var ErrYield = errors.New("workflow yielded")
 
-// ErrConcurrentUpdate is returned when a concurrent update is detected.
-var ErrConcurrentUpdate = errors.New("concurrent update detected")
-
 // yieldError wraps ErrYield with a correlation ID so it can be persisted and later signalled.
 type yieldError struct {
 	cid string
@@ -308,9 +305,6 @@ func (w *Workflow[Input, Output]) execute(ctx context.Context, runID string, scr
 		if errors.Is(err, ErrYield) {
 			return zero, nil // expected pause
 		}
-		if errors.Is(err, ErrConcurrentUpdate) {
-			return zero, ErrConcurrentUpdate
-		}
 		_ = w.store.UpdateRunError(ctx, runID, fmt.Sprintf("starlark execution failed: %v", err))
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
@@ -450,7 +444,13 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			return nil, fmt.Errorf("failed to marshal call input: %w", err)
 		}
 
-		if err := w.store.RecordEvent(runID, &Event{
+		// Get current run state to get NextEventID
+		run, err := w.store.GetRun(runID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get run state: %w", err)
+		}
+
+		if err := w.store.RecordEvent(runID, run.NextEventID, &Event{
 			Timestamp:    time.Now(),
 			Type:         EventTypeCall,
 			FunctionName: name,
@@ -484,7 +484,12 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		if errors.As(err, &yerr) {
 			cid := yerr.CorrelationID()
 			evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: name, CorrelationID: cid, Input: inputBytes}
-			if recErr := w.store.UpdateRunStatusAndRecordEvent(ctx, runID, RunStatusWaiting, evt, nil); recErr != nil {
+			// Get updated run state for NextEventID
+			run, err := w.store.GetRun(runID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to get run state: %w", err)
+			}
+			if recErr := w.store.UpdateRunStatusAndRecordEvent(ctx, runID, run.NextEventID, RunStatusWaiting, evt, nil); recErr != nil {
 				return nil, recErr
 			}
 			return nil, err
@@ -505,15 +510,13 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		if err != nil {
 			event.Error = err.Error()
 		}
-		if recordErr := w.store.RecordEvent(runID, event); recordErr != nil {
-			if err != nil {
-				return nil, fmt.Errorf("function call failed: %v; also failed to record return event: %v", err, recordErr)
-			}
-			return nil, fmt.Errorf("failed to record return event: %w", recordErr)
-		}
-
+		// Get updated run state for NextEventID
+		run, err = w.store.GetRun(runID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to get run state: %w", err)
+		}
+		if recordErr := w.store.RecordEvent(runID, run.NextEventID, event); recordErr != nil {
+			return nil, fmt.Errorf("failed to record return event: %w", recordErr)
 		}
 
 		return starlarkproto.MakeMessage(resp), nil
@@ -558,9 +561,15 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 		// create yield error and get cid
 		cid, yerr := Yield()
 
+		// Get current run state to get NextEventID
+		run, err := w.store.GetRun(runID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get run state: %w", err)
+		}
+
 		// Persist yield event and status/wake
 		evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: "time.sleep", CorrelationID: cid}
-		if recErr := w.store.UpdateRunStatusAndRecordEvent(starlarkCtx.ctx, runID, RunStatusWaiting, evt, &wake); recErr != nil {
+		if recErr := w.store.UpdateRunStatusAndRecordEvent(starlarkCtx.ctx, runID, run.NextEventID, RunStatusWaiting, evt, &wake); recErr != nil {
 			return nil, recErr
 		}
 
@@ -584,6 +593,12 @@ func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID stri
 		outputBytes, _ = proto.Marshal(resp)
 	}
 
+	// Get current run state to get NextEventID
+	run, err := w.store.GetRun(runID)
+	if err != nil {
+		return fmt.Errorf("failed to get run state: %w", err)
+	}
+
 	evt := &Event{Timestamp: time.Now(), Type: EventTypeReturn, FunctionName: yieldEvent.FunctionName, CorrelationID: correlationID, Output: outputBytes}
-	return w.store.UpdateRunStatusAndRecordEvent(ctx, runID, RunStatusPending, evt, nil)
+	return w.store.UpdateRunStatusAndRecordEvent(ctx, runID, run.NextEventID, RunStatusPending, evt, nil)
 }

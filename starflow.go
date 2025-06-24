@@ -1,6 +1,7 @@
 package starflow
 
 import (
+	"errors"
 	"time"
 )
 
@@ -58,3 +59,6 @@ type Event struct {
 	Error         string
 	CorrelationID string
 }
+
+// ErrConcurrentUpdate indicates optimistic concurrency failure.
+var ErrConcurrentUpdate = errors.New("concurrent update")

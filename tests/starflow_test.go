@@ -13,7 +13,7 @@ import (
 )
 
 func TestWorkflow(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -88,7 +88,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_Resume(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	// --- First run: Fails during baking ---
 	bakingShouldFail := true
@@ -153,7 +153,12 @@ def main(ctx, input):
 	// --- Second run: Resumes and succeeds ---
 	bakingShouldFail = false
 
-	if err := store.UpdateRunStatusAndRecordEvent(context.Background(), runID, starflow.RunStatusPending, nil, nil); err != nil {
+	// Get current run state to get NextEventID
+	run, err = store.GetRun(runID)
+	if err != nil {
+		t.Fatalf("failed to get run state: %v", err)
+	}
+	if err := store.UpdateRunStatusAndRecordEvent(context.Background(), runID, run.NextEventID, starflow.RunStatusPending, nil, nil); err != nil {
 		t.Fatalf("failed to reset status: %v", err)
 	}
 
@@ -199,7 +204,7 @@ def main(ctx, input):
 // TestWorkflowLibraryUsage demonstrates how to use the starflow library.
 func TestWorkflowLibraryUsage(t *testing.T) {
 	// Step 1: Create a temporary database for workflow storage
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	// Step 3: Create the workflow and register functions
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
@@ -308,7 +313,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_StarlarkMathImport(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -351,7 +356,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_RetryPolicy(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -397,7 +402,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_SleepFunction(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
@@ -435,7 +440,7 @@ def main(ctx, input):
 }
 
 func TestWorkflow_Yield(t *testing.T) {
-	store := NewSQLiteStore(t)
+	store := NewMemoryStore(t)
 
 	wf := starflow.New[*testpb.PingRequest, *testpb.PingResponse](store)
 
