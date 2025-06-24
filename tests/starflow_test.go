@@ -406,7 +406,8 @@ load("proto", "proto")
 load("time", "sleep")
 
 def main(ctx, input):
-	sleep(ctx=ctx, duration=5)  # 5ms durable sleep
+	dur_proto = proto.file("google/protobuf/duration.proto")
+	sleep(ctx=ctx, duration=dur_proto.Duration(seconds=0, nanos=5000000))  # 5ms durable sleep
 	return proto.file("ping.proto").PingResponse(message="woke")
 `
 

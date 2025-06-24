@@ -21,6 +21,7 @@ import (
 	"go.starlark.net/starlark"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/durationpb"
 )
 
 // ErrYield is returned by workflow functions to indicate that execution should pause until an external signal is received.
@@ -536,20 +537,18 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 			}
 		}
 
-		// duration in milliseconds
-		var durMs int64
-		switch v := durationVal.(type) {
-		case starlark.Int:
-			if i, ok := v.Int64(); ok {
-				durMs = i
-			} else {
-				return nil, fmt.Errorf("duration too big")
-			}
-		default:
-			return nil, fmt.Errorf("duration must be int milliseconds")
+		// duration must be a google.protobuf.Duration proto message
+		durVal, ok := durationVal.(*starlarkproto.Message)
+		if !ok {
+			return nil, fmt.Errorf("duration must be google.protobuf.Duration proto message")
 		}
 
-		wake := time.Now().Add(time.Duration(durMs) * time.Millisecond)
+		durMsg, ok := durVal.ProtoReflect().Interface().(*durationpb.Duration)
+		if !ok {
+			return nil, fmt.Errorf("duration must be google.protobuf.Duration")
+		}
+
+		wake := time.Now().Add(durMsg.AsDuration())
 
 		// create yield error and get cid
 		cid, yerr := Yield()
