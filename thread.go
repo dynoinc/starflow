@@ -408,16 +408,9 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			proto.Merge(req, pm.ProtoReflect().Interface())
 		}
 
-		if len(t.events) > 0 {
-			nextEvent := t.events[0]
-			t.events = t.events[1:]
-			if nextEvent.Type != EventTypeCall {
-				return starlark.None, fmt.Errorf("expected call event, got %s", nextEvent.Type)
-			}
-
-			callEvent, ok := nextEvent.AsCallEvent()
-			if !ok {
-				return starlark.None, fmt.Errorf("expected call event metadata")
+		if callEvent, err, ok := popEvent[CallEvent](t); ok {
+			if err != nil {
+				return starlark.None, err
 			}
 
 			if callEvent.FunctionName != regFn.name {
@@ -433,79 +426,68 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("expected input to be %v, got %v", expectedProto, req)
 			}
 		} else {
-			inputAny, _ := anypb.New(req)
+			inputAny, err := anypb.New(req)
+			if err != nil {
+				return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
+			}
+
 			if err := recordEvent(starlarkCtx.ctx, t, CallEvent{FunctionName: regFn.name, Input: inputAny}); err != nil {
 				return starlark.None, err
 			}
 		}
 
-		if len(t.events) > 0 {
-			nextEvent := t.events[0]
-			t.events = t.events[1:]
+		if returnEvent, err, ok := popEvent[ReturnEvent](t); ok {
+			if err != nil {
+				return starlark.None, err
+			}
 
-			switch nextEvent.Type {
-			case EventTypeReturn:
-				returnEvent, ok := nextEvent.AsReturnEvent()
-				if !ok {
-					return starlark.None, fmt.Errorf("expected return event metadata")
+			if returnEvent.Error != nil {
+				return starlark.None, returnEvent.Error
+			}
+
+			if returnEvent.Output != nil {
+				respProto := proto.Clone(regFn.resType)
+				if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
+					return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
 				}
 
-				if returnEvent.Error != nil {
-					return starlark.None, returnEvent.Error
-				}
-
-				if returnEvent.Output != nil {
-					respProto := proto.Clone(regFn.resType)
-					if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
-						return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
-					}
-
-					return starlarkproto.MakeMessage(respProto), nil
-				} else {
-					return starlark.None, nil
-				}
-
-			case EventTypeYield:
-				yieldEvent, ok := nextEvent.AsYieldEvent()
-				if !ok {
-					return starlark.None, fmt.Errorf("expected yield event metadata")
-				}
-
-				if len(t.events) == 0 {
-					// still waiting for the signal to resume. ideally we should have not tried to resume the run
-					// but anyways, life happens.
-					return starlark.None, &YieldError{cid: yieldEvent.SignalID}
-				}
-
-				nextEvent := t.events[0]
-				t.events = t.events[1:]
-				if nextEvent.Type != EventTypeResume {
-					return starlark.None, fmt.Errorf("expected resume event, got %s", nextEvent.Type)
-				}
-
-				resumeEvent, ok := nextEvent.AsResumeEvent()
-				if !ok {
-					return starlark.None, fmt.Errorf("expected resume event metadata")
-				}
-
-				if resumeEvent.SignalID != yieldEvent.SignalID {
-					return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID, resumeEvent.SignalID)
-				}
-
-				if resumeEvent.Output != nil {
-					respProto := proto.Clone(regFn.resType)
-					if err := resumeEvent.Output.UnmarshalTo(respProto); err != nil {
-						return starlark.None, fmt.Errorf("failed to unmarshal resume event output: %w", err)
-					}
-
-					return starlarkproto.MakeMessage(respProto), nil
-				} else {
-					return starlark.None, nil
-				}
+				return starlarkproto.MakeMessage(respProto), nil
+			} else {
+				return starlark.None, nil
 			}
 		}
 
-		// otherwise, we need to call the function
+		if yieldEvent, err, ok := popEvent[YieldEvent](t); ok {
+			if err != nil {
+				return starlark.None, err
+			}
+
+			resumeEvent, err, ok := popEvent[ResumeEvent](t)
+			if !ok {
+				// still waiting for the signal to resume. ideally we should have not tried to resume the run
+				// but anyways, life happens.
+				return starlark.None, &YieldError{cid: yieldEvent.SignalID}
+			}
+			if err != nil {
+				return starlark.None, err
+			}
+
+			if resumeEvent.SignalID != yieldEvent.SignalID {
+				return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID, resumeEvent.SignalID)
+			}
+
+			if resumeEvent.Output != nil {
+				respProto := proto.Clone(regFn.resType)
+				if err := resumeEvent.Output.UnmarshalTo(respProto); err != nil {
+					return starlark.None, fmt.Errorf("failed to unmarshal resume event output: %w", err)
+				}
+
+				return starlarkproto.MakeMessage(respProto), nil
+			} else {
+				return starlark.None, nil
+			}
+		}
+
 		var resp proto.Message
 		callFunc := func() error {
 			ctx, span := t.w.tracer.Start(ctx, regFn.name)
