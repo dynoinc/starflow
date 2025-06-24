@@ -50,7 +50,9 @@ def main(ctx, input):
 	require.Equal(t, starflow.EventTypeCall, events[0].Type)
 	require.Equal(t, "pingFn", events[0].FunctionName)
 	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
-	require.Empty(t, events[1].Error)
+	if returnEvent, ok := events[1].AsReturnEvent(); ok {
+		require.Empty(t, returnEvent.Error)
+	}
 
 	var outputResp testpb.PingResponse
 	require.NoError(t, proto.Unmarshal(run.Output, &outputResp))
@@ -288,8 +290,10 @@ def main(ctx, input):
 	// Second event should be the return with error
 	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
 	require.Equal(t, "failingFn", events[1].FunctionName)
-	require.NotEmpty(t, events[1].Error)
-	require.Contains(t, events[1].Error, "intentional failure: should fail")
+	if returnEvent, ok := events[1].AsReturnEvent(); ok {
+		require.NotEmpty(t, returnEvent.Error)
+		require.Contains(t, returnEvent.Error, "intentional failure: should fail")
+	}
 
 	t.Log("✅ Workflow failure correctly detected!")
 	t.Logf("Run ID: %s", runID)

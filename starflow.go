@@ -2,6 +2,8 @@ package starflow
 
 import (
 	"time"
+
+	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // RunStatus represents the status of a workflow run.
@@ -48,12 +50,42 @@ const (
 	EventTypeReturn EventType = "RETURN"
 )
 
+// EventMetadata interface for different event types
+type EventMetadata interface {
+	EventType() EventType
+}
+
+// CallEvent metadata
+type CallEvent struct {
+	Input *anypb.Any
+}
+
+func (c CallEvent) EventType() EventType { return EventTypeCall }
+
+// ReturnEvent metadata
+type ReturnEvent struct {
+	Output *anypb.Any
+	Error  string
+}
+
+func (r ReturnEvent) EventType() EventType { return EventTypeReturn }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp    time.Time
 	Type         EventType
 	FunctionName string
-	Input        []byte
-	Output       []byte
-	Error        string
+	// Generic metadata that can hold different types
+	Metadata EventMetadata
+}
+
+// Helper methods for type-safe access
+func (e Event) AsCallEvent() (CallEvent, bool) {
+	callEvent, ok := e.Metadata.(CallEvent)
+	return callEvent, ok
+}
+
+func (e Event) AsReturnEvent() (ReturnEvent, bool) {
+	returnEvent, ok := e.Metadata.(ReturnEvent)
+	return returnEvent, ok
 }

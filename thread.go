@@ -19,6 +19,7 @@ import (
 	"go.starlark.net/syntax"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoregistry"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -85,33 +86,38 @@ func runThread[Input proto.Message, Output proto.Message](
 			Timestamp:    e.Timestamp,
 			Type:         e.Type,
 			FunctionName: e.FunctionName,
-			Error:        e.Error,
 		}
 
 		reqType, ok := w.types[e.FunctionName]
 		if !ok {
 			return zero, fmt.Errorf("unknown function: %s", e.FunctionName)
 		}
-		if len(e.Input) > 0 {
+
+		if callEvent, ok := e.AsCallEvent(); ok && callEvent.Input != nil {
 			req := proto.Clone(reqType)
-			if err := proto.Unmarshal(e.Input, req); err != nil {
+			if err := callEvent.Input.UnmarshalTo(req); err != nil {
 				return zero, fmt.Errorf("failed to unmarshal event input: %w", err)
 			}
-			inputBytes, _ := proto.Marshal(req)
-			protoEvent.Input = inputBytes
+			inputAny, _ := anypb.New(req)
+			protoEvent.Metadata = CallEvent{Input: inputAny}
 		}
 
 		resType, ok := w.types[e.FunctionName+"_response"]
 		if !ok {
 			return zero, fmt.Errorf("unknown function: %s", e.FunctionName)
 		}
-		if len(e.Output) > 0 {
-			res := proto.Clone(resType)
-			if err := proto.Unmarshal(e.Output, res); err != nil {
-				return zero, fmt.Errorf("failed to unmarshal event output: %w", err)
+
+		if returnEvent, ok := e.AsReturnEvent(); ok {
+			if returnEvent.Error != "" {
+				protoEvent.Metadata = ReturnEvent{Error: returnEvent.Error}
+			} else if returnEvent.Output != nil {
+				res := proto.Clone(resType)
+				if err := returnEvent.Output.UnmarshalTo(res); err != nil {
+					return zero, fmt.Errorf("failed to unmarshal event output: %w", err)
+				}
+				outputAny, _ := anypb.New(res)
+				protoEvent.Metadata = ReturnEvent{Output: outputAny}
 			}
-			outputBytes, _ := proto.Marshal(res)
-			protoEvent.Output = outputBytes
 		}
 
 		protoEvents[i] = protoEvent
@@ -237,11 +243,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			proto.Merge(req, pm.ProtoReflect().Interface())
 		}
 
-		inputBytes, err := proto.Marshal(req)
-		if err != nil {
-			return starlark.None, fmt.Errorf("failed to marshal call input: %w", err)
-		}
-
 		if len(t.events) > 0 {
 			// verify the next event is a call event with same args
 			nextEvent := t.events[0]
@@ -250,8 +251,13 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("expected call event, got %s", nextEvent.Type)
 			}
 
+			callEvent, ok := nextEvent.AsCallEvent()
+			if !ok {
+				return starlark.None, fmt.Errorf("expected call event metadata")
+			}
+
 			expectedProto := proto.Clone(regFn.reqType)
-			if err := proto.Unmarshal(nextEvent.Input, expectedProto); err != nil {
+			if err := callEvent.Input.UnmarshalTo(expectedProto); err != nil {
 				return starlark.None, fmt.Errorf("failed to unmarshal expected proto: %w", err)
 			}
 
@@ -259,11 +265,12 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("expected input to be %v, got %v", expectedProto, req)
 			}
 		} else {
+			inputAny, _ := anypb.New(req)
 			nextEventID, err := t.w.store.RecordEvent(ctx, t.run.ID, t.run.NextEventID, &Event{
 				Timestamp:    time.Now(),
 				Type:         EventTypeCall,
 				FunctionName: regFn.name,
-				Input:        inputBytes,
+				Metadata:     CallEvent{Input: inputAny},
 			})
 			if err != nil {
 				return starlark.None, fmt.Errorf("failed to record call event: %w", err)
@@ -280,22 +287,22 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("expected return event, got %s", nextEvent.Type)
 			}
 
-			expectedProto := proto.Clone(regFn.reqType)
-			if err := proto.Unmarshal(nextEvent.Input, expectedProto); err != nil {
-				return starlark.None, fmt.Errorf("failed to unmarshal expected proto: %w", err)
-			}
-
-			if !proto.Equal(req, expectedProto) {
-				return starlark.None, fmt.Errorf("expected input to be %v, got %v", expectedProto, req)
+			returnEvent, ok := nextEvent.AsReturnEvent()
+			if !ok {
+				return starlark.None, fmt.Errorf("expected return event metadata")
 			}
 
 			// re-use the output from the return event
-			respProto := proto.Clone(regFn.resType)
-			if err := proto.Unmarshal(nextEvent.Output, respProto); err != nil {
-				return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
-			}
+			if returnEvent.Output != nil {
+				respProto := proto.Clone(regFn.resType)
+				if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
+					return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
+				}
 
-			return starlarkproto.MakeMessage(respProto), nil
+				return starlarkproto.MakeMessage(respProto), nil
+			} else if returnEvent.Error != "" {
+				return starlark.None, fmt.Errorf("function returned error: %s", returnEvent.Error)
+			}
 		}
 
 		// otherwise, we need to call the function
@@ -315,12 +322,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			return innerErr
 		}
 
-		event := &Event{
-			Timestamp:    time.Now(),
-			Type:         EventTypeReturn,
-			FunctionName: regFn.name,
-		}
-
 		var callErr error
 		if regFn.retryPolicy != nil {
 			policy := backoff.WithContext(regFn.retryPolicy, starlarkCtx.ctx)
@@ -330,7 +331,13 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		}
 
 		if callErr != nil {
-			event.Error = callErr.Error()
+			event := &Event{
+				Timestamp:    time.Now(),
+				Type:         EventTypeReturn,
+				FunctionName: regFn.name,
+				Metadata:     ReturnEvent{Error: callErr.Error()},
+			}
+
 			wrapFnSpan.SetStatus(codes.Error, callErr.Error())
 
 			nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, event)
@@ -345,9 +352,16 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 
 		// Success case
 		wrapFnSpan.SetStatus(codes.Ok, "success")
-		event.Output, err = proto.Marshal(resp)
+		outputAny, err := anypb.New(resp)
 		if err != nil {
 			return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
+		}
+
+		event := &Event{
+			Timestamp:    time.Now(),
+			Type:         EventTypeReturn,
+			FunctionName: regFn.name,
+			Metadata:     ReturnEvent{Output: outputAny},
 		}
 
 		nextEventID, err := t.w.store.RecordEvent(starlarkCtx.ctx, t.run.ID, t.run.NextEventID, event)

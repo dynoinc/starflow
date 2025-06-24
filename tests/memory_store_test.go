@@ -157,9 +157,11 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
-	if event.Type == starflow.EventTypeReturn && event.Error != "" {
-		storedRun.Status = starflow.RunStatusFailed
-		storedRun.Error = event.Error
+	if event.Type == starflow.EventTypeReturn {
+		if returnEvent, ok := event.AsReturnEvent(); ok && returnEvent.Error != "" {
+			storedRun.Status = starflow.RunStatusFailed
+			storedRun.Error = returnEvent.Error
+		}
 	}
 
 	storedRun.NextEventID++
