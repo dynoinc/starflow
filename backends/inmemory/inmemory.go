@@ -1,4 +1,4 @@
-package starflow_test
+package inmemory
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/tests/suite"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -24,8 +23,8 @@ type MemoryStore struct {
 	yields  map[string]string
 }
 
-// NewMemoryStore creates a new MemoryStore.
-func NewMemoryStore(t *testing.T) *MemoryStore {
+// New creates a new MemoryStore.
+func New(t *testing.T) *MemoryStore {
 	return &MemoryStore{
 		scripts: make(map[string][]byte),
 		runs:    make(map[string]*starflow.Run),
@@ -75,6 +74,10 @@ func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input *a
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if _, exists := s.scripts[scriptHash]; !exists {
+		return "", fmt.Errorf("script with hash %s not found", scriptHash)
+	}
 
 	s.runs[runID] = run
 	s.events[runID] = make([]*starflow.Event, 0)
@@ -244,8 +247,4 @@ func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output *anypb
 	run.Status = starflow.RunStatusCompleted
 	run.UpdatedAt = time.Now()
 	return nil
-}
-
-func TestMemoryStore_Suite(t *testing.T) {
-	suite.RunStoreSuite(t, func(t *testing.T) starflow.Store { return NewMemoryStore(t) })
 }

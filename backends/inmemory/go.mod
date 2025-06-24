@@ -1,30 +1,30 @@
-module github.com/dynoinc/starflow
+module github.com/dynoinc/starflow/backends/inmemory
 
 go 1.24.4
 
 require (
-	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/dynoinc/starflow/backends/inmemory v0.0.0-00010101000000-000000000000
-	github.com/emcfarlane/starlarkproto v0.0.0-20240320211046-843c31c8d5ed
+	github.com/dynoinc/starflow v0.0.0-00010101000000-000000000000
 	github.com/lithammer/shortuuid/v4 v4.2.0
-	github.com/stretchr/testify v1.10.0
-	go.opentelemetry.io/otel v1.36.0
-	go.opentelemetry.io/otel/trace v1.36.0
-	go.starlark.net v0.0.0-20250623223156-8bf495bf4e9a
 	google.golang.org/protobuf v1.36.6
 )
 
 require (
+	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/emcfarlane/starlarkproto v0.0.0-20240320211046-843c31c8d5ed // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
+	github.com/stretchr/testify v1.10.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.1.0 // indirect
+	go.opentelemetry.io/otel v1.36.0 // indirect
 	go.opentelemetry.io/otel/metric v1.36.0 // indirect
+	go.opentelemetry.io/otel/trace v1.36.0 // indirect
+	go.starlark.net v0.0.0-20250623223156-8bf495bf4e9a // indirect
 	golang.org/x/sys v0.33.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/dynoinc/starflow/backends/inmemory => ./backends/inmemory
+replace github.com/dynoinc/starflow => ../../

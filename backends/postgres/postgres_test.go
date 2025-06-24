@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/tests/suite"
+	"github.com/dynoinc/starflow/suite"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -23,7 +23,7 @@ func newPostgresStore(t *testing.T) starflow.Store {
 	dsn := postgresContainer.MustConnectionString(ctx, "sslmode=disable")
 
 	// Create store
-	store, err := NewStore(dsn)
+	store, err := New(dsn)
 	require.NoError(t, err)
 	return store
 }

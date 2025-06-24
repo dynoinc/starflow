@@ -22,8 +22,8 @@ type Store struct {
 	db *sql.DB
 }
 
-// NewStore creates a new PostgreSQL store
-func NewStore(dsn string) (*Store, error) {
+// New creates a new PostgreSQL store
+func New(dsn string) (*Store, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -140,12 +140,32 @@ func (s *Store) CreateRun(ctx context.Context, scriptHash string, input *anypb.A
 		}
 	}
 
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Check if script hash exists
+	var exists bool
+	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM scripts WHERE hash = $1)`, scriptHash).Scan(&exists)
+	if err != nil {
+		return "", fmt.Errorf("failed to check script existence: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("script with hash %s not found", scriptHash)
+	}
+
 	query := `INSERT INTO runs (id, script_hash, input, status, next_event_id) 
 			  VALUES ($1, $2, $3, $4, $5)`
 
-	_, err := s.db.ExecContext(ctx, query, runID, scriptHash, inputBytes, starflow.RunStatusPending, 0)
+	_, err = tx.ExecContext(ctx, query, runID, scriptHash, inputBytes, starflow.RunStatusPending, 0)
 	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return "", fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
 	return runID, nil
@@ -161,10 +181,11 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 	var inputBytes, outputBytes []byte
 	var errorMsg sql.NullString
 	var leaseUntil sql.NullTime
+	var workerID sql.NullString
 
 	err := s.db.QueryRowContext(ctx, query, runID).Scan(
 		&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
-		&run.WorkerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
+		&workerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -187,6 +208,11 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 		if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal output: %w", err)
 		}
+	}
+
+	// Convert worker ID
+	if workerID.Valid {
+		run.WorkerID = workerID.String
 	}
 
 	// Convert lease time
@@ -229,10 +255,11 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 		var inputBytes, outputBytes []byte
 		var errorMsg sql.NullString
 		var leaseUntil sql.NullTime
+		var workerID sql.NullString
 
 		err := rows.Scan(
 			&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
-			&run.WorkerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
+			&workerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan run: %w", err)
@@ -252,6 +279,11 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 			if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
 				return nil, fmt.Errorf("failed to unmarshal output: %w", err)
 			}
+		}
+
+		// Convert worker ID
+		if workerID.Valid {
+			run.WorkerID = workerID.String
 		}
 
 		// Convert lease time

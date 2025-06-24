@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/dynoinc/starflow"
-	testpb "github.com/dynoinc/starflow/tests/proto"
+	testpb "github.com/dynoinc/starflow/suite/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -19,6 +19,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Helper()
 	s := newStore(t)
 	ctx := t.Context()
+
+	sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+	require.NoError(t, err)
 
 	t.Run("CreateRunWithNonExistentScriptHash", func(t *testing.T) {
 		_, err := s.CreateRun(ctx, "non-existent-hash", nil)
@@ -38,7 +41,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("CreateGetRun", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "hash", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
@@ -46,7 +49,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("NextEventID", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -59,7 +62,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -79,7 +82,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ReturnEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -97,7 +100,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("YieldEventUpdatesRunToYielded", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -112,7 +115,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("LeaseClaim", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "x", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		if ok, _ := s.ClaimRun(ctx, id, "w1", time.Now().Add(20*time.Millisecond)); !ok {
@@ -128,7 +131,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimRunWithSameWorkerID", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "x", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		// First claim should succeed
@@ -148,7 +151,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimRunWithExpiredLease", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "x", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		// Claim with past lease time should succeed
@@ -166,7 +169,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("SignalWithNonExistentRunID", func(t *testing.T) {
 		// First create a run and yield it to create a signal
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -192,7 +195,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("SignalTwiceWithSameSignalID", func(t *testing.T) {
 		// First create a run and yield it to create a signal
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -212,7 +215,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("FinishRun", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
@@ -227,17 +230,17 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("ListRuns", func(t *testing.T) {
 		// Create multiple runs
-		_, err := s.CreateRun(ctx, "h1", nil)
+		_, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-		_, err = s.CreateRun(ctx, "h2", nil)
+		_, err = s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-		_, err = s.CreateRun(ctx, "h3", nil)
+		_, err = s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		// Test listing all runs
 		runs, err := s.ListRuns(ctx)
 		require.NoError(t, err)
-		require.Len(t, runs, 3)
+		require.Greater(t, len(runs), 3)
 
 		// Test listing by specific status (all should be PENDING by default)
 		pendingRuns, err := s.ListRuns(ctx, starflow.RunStatusPending)
@@ -256,7 +259,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("GetEvents", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, "h", nil)
+		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)

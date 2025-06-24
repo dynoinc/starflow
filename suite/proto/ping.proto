@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package testproto;
 
-option go_package = "github.com/dynoinc/starflow/tests/proto;testproto";
+option go_package = "github.com/dynoinc/starflow/suite/proto;testproto";
 
 message PingRequest {
   string message = 1;
