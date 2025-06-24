@@ -47,7 +47,7 @@ func (y YieldError) CorrelationID() string { return y.cid }
 //	cid, err := starflow.Yield()
 //	return nil, err
 func Yield() (string, error) {
-	cid := shortuuid.New()[:8]
+	cid := shortuuid.New()
 	return cid, YieldError{cid: cid}
 }
 
@@ -497,9 +497,6 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 			if yerr, ok := err.(interface{ CorrelationID() string }); ok {
 				cid = yerr.CorrelationID()
 			}
-			if cid == "" {
-				cid = shortuuid.New()[:8] // fallback, should not normally happen
-			}
 			if recErr := w.store.RecordEvent(runID, &Event{
 				Timestamp:     time.Now(),
 				Type:          EventTypeYield,
@@ -584,7 +581,7 @@ func (w *Workflow[Input, Output]) makeSleepBuiltin(runID string) *starlark.Built
 		wake := time.Now().Add(time.Duration(durMs) * time.Millisecond)
 
 		// get correlation id via helper
-		cid := shortuuid.New()[:8]
+		cid := shortuuid.New()
 
 		// Persist yield event
 		if recErr := w.store.RecordEvent(runID, &Event{
@@ -636,9 +633,6 @@ func (w *Workflow[Input, Output]) Signal(ctx context.Context, correlationID stri
 	}); err != nil {
 		return err
 	}
-
-	// clear wake_at if any
-	_ = w.store.UpdateRunWakeUp(ctx, runID, nil)
 
 	// Mark run ready
 	return w.store.UpdateRunStatus(ctx, runID, RunStatusPending)
