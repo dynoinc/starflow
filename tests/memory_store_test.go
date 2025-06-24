@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dynoinc/starflow"
+	"github.com/dynoinc/starflow/tests/suite"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -246,5 +247,5 @@ func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output *anypb
 }
 
 func TestMemoryStore_Suite(t *testing.T) {
-	runStoreSuite(t, func(t *testing.T) starflow.Store { return NewMemoryStore(t) })
+	suite.RunStoreSuite(t, func(t *testing.T) starflow.Store { return NewMemoryStore(t) })
 }

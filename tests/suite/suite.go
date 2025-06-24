@@ -1,7 +1,4 @@
-// This file has been moved to tests/suite/suite.go for reusability
-// The test suite is now available as a reusable package that can be used by other store implementations.
-
-package starflow_test
+package suite
 
 import (
 	"errors"
@@ -14,9 +11,11 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
-type storeFactory func(t *testing.T) starflow.Store
+// StoreFactory is a function that creates a new store instance for testing
+type StoreFactory func(t *testing.T) starflow.Store
 
-func runStoreSuite(t *testing.T, newStore storeFactory) {
+// RunStoreSuite runs the complete test suite against a store implementation
+func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Helper()
 
 	ctx := t.Context()
