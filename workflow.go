@@ -495,11 +495,9 @@ func (w *Workflow[Input, Output]) wrapFn(runID string, name string, regFn regist
 		}
 
 		// Handle yield sentinel separately
-		if errors.Is(err, ErrYield) {
-			var cid string
-			if yerr, ok := err.(interface{ CorrelationID() string }); ok {
-				cid = yerr.CorrelationID()
-			}
+		var yerr interface{ CorrelationID() string }
+		if errors.As(err, &yerr) {
+			cid := yerr.CorrelationID()
 			evt := &Event{Timestamp: time.Now(), Type: EventTypeYield, FunctionName: name, CorrelationID: cid, Input: inputBytes}
 			if recErr := w.store.UpdateRunStatusAndRecordEvent(ctx, runID, RunStatusWaiting, evt, nil); recErr != nil {
 				return nil, recErr
