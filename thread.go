@@ -144,16 +144,16 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 				return nil, err
 			}
 			sleepDuration = time.Until(sleepEvent.WakeupAt())
+		} else {
+			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
+				return nil, err
+			}
 		}
 
 		select {
 		case <-starlarkCtx.ctx.Done():
 			return nil, starlarkCtx.ctx.Err()
 		case <-time.After(sleepDuration):
-		}
-
-		if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
-			return nil, err
 		}
 
 		return starlark.None, nil
@@ -179,10 +179,12 @@ func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
 				return nil, err
 			}
 			timestamp = timeNowEvent.Timestamp()
-		}
+		} else {
+			timestamp = time.Now()
 
-		if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewTimeNowEvent(timestamp)); err != nil {
-			return nil, err
+			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewTimeNowEvent(timestamp)); err != nil {
+				return nil, err
+			}
 		}
 
 		// Convert to google.protobuf.Timestamp
@@ -222,8 +224,8 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 			}
 			result = randIntEvent.Result()
 		} else {
-			// record a rand_int event
 			result = rand.Int63n(maxInt64)
+
 			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewRandIntEvent(result)); err != nil {
 				return nil, err
 			}
