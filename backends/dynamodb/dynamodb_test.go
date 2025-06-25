@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/dynoinc/starflow"
 	"github.com/dynoinc/starflow/suite"
+	"github.com/stretchr/testify/require"
 	dynamodbcontainer "github.com/testcontainers/testcontainers-go/modules/dynamodb"
 )
 
@@ -18,15 +19,11 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 	ctx := context.Background()
 
 	container, err := dynamodbcontainer.Run(ctx, "amazon/dynamodb-local:latest")
-	if err != nil {
-		t.Fatalf("failed to start dynamodb container: %v", err)
-	}
+	require.NoError(t, err)
 	defer container.Terminate(ctx)
 
 	endpoint, err := container.Endpoint(ctx, "")
-	if err != nil {
-		t.Fatalf("failed to get dynamodb endpoint: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Add protocol scheme to endpoint
 	endpointURL := "http://" + endpoint
@@ -34,9 +31,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion("us-east-1"),
 	)
-	if err != nil {
-		t.Fatalf("failed to load AWS config: %v", err)
-	}
+	require.NoError(t, err)
 
 	dynamoClient := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
 		o.BaseEndpoint = aws.String(endpointURL)
@@ -58,9 +53,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})
-	if err != nil {
-		t.Fatalf("failed to create scripts table: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &runsTable,
@@ -85,9 +78,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})
-	if err != nil {
-		t.Fatalf("failed to create runs table: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &eventsTable,
@@ -101,9 +92,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})
-	if err != nil {
-		t.Fatalf("failed to create events table: %v", err)
-	}
+	require.NoError(t, err)
 
 	_, err = dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &signalsTable,
@@ -115,9 +104,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})
-	if err != nil {
-		t.Fatalf("failed to create signals table: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Wait for tables to be active
 	waitForTable := func(table string) {

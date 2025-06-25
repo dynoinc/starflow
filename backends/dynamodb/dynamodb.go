@@ -37,6 +37,17 @@ func New(client *dynamodb.Client, tableName, scriptsTableName, eventsTableName, 
 	}
 }
 
+// formatTimestamp formats a time.Time to ISO 8601 format for DynamoDB storage.
+// This ensures consistent timestamp formatting across all operations.
+func formatTimestamp(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// parseTimestamp parses an ISO 8601 formatted timestamp string back to time.Time.
+func parseTimestamp(s string) (time.Time, error) {
+	return time.Parse("2006-01-02T15:04:05.000Z", s)
+}
+
 // SaveScript persists the Starlark script content.
 func (s *DynamoDBStore) SaveScript(ctx context.Context, content []byte) (string, error) {
 	hash := sha256.Sum256(content)
@@ -45,7 +56,7 @@ func (s *DynamoDBStore) SaveScript(ctx context.Context, content []byte) (string,
 	item := map[string]types.AttributeValue{
 		"script_hash": &types.AttributeValueMemberS{Value: hashStr},
 		"content":     &types.AttributeValueMemberB{Value: content},
-		"created_at":  &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+		"created_at":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 	}
 
 	_, err := s.client.PutItem(ctx, &dynamodb.PutItemInput{
@@ -99,7 +110,7 @@ func (s *DynamoDBStore) CreateRun(ctx context.Context, scriptHash string, input 
 	}
 
 	runID := shortuuid.New()
-	now := time.Now().UTC()
+	now := time.Now()
 
 	// Create the run item directly with proper types
 	item := map[string]types.AttributeValue{
@@ -107,8 +118,8 @@ func (s *DynamoDBStore) CreateRun(ctx context.Context, scriptHash string, input 
 		"script_hash":   &types.AttributeValueMemberS{Value: scriptHash},
 		"status":        &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
 		"next_event_id": &types.AttributeValueMemberN{Value: "0"},
-		"created_at":    &types.AttributeValueMemberS{Value: now.Format(time.RFC3339)},
-		"updated_at":    &types.AttributeValueMemberS{Value: now.Format(time.RFC3339)},
+		"created_at":    &types.AttributeValueMemberS{Value: formatTimestamp(now)},
+		"updated_at":    &types.AttributeValueMemberS{Value: formatTimestamp(now)},
 	}
 
 	if input != nil {
@@ -229,9 +240,9 @@ func (s *DynamoDBStore) ClaimRun(ctx context.Context, runID string, workerID str
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":worker_id":   &types.AttributeValueMemberS{Value: workerID},
-			":lease_until": &types.AttributeValueMemberS{Value: leaseUntil.Format(time.RFC3339)},
-			":updated_at":  &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
-			":now":         &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+			":lease_until": &types.AttributeValueMemberS{Value: formatTimestamp(leaseUntil)},
+			":updated_at":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
+			":now":         &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 		},
 	})
 
@@ -261,7 +272,7 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		"event_id":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", nextEventID)},
 		"event_type": &types.AttributeValueMemberS{Value: string(eventMetadata.EventType())},
 		"metadata":   &types.AttributeValueMemberS{Value: string(metadataData)},
-		"timestamp":  &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+		"timestamp":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 	}
 
 	// Prepare the run update
@@ -272,7 +283,7 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	}
 	expressionAttributeValues := map[string]types.AttributeValue{
 		":inc":        &types.AttributeValueMemberN{Value: "1"},
-		":updated_at": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+		":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 	}
 
 	// Add event-specific updates
@@ -322,7 +333,7 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 			signalItem := map[string]types.AttributeValue{
 				"signal_id":  &types.AttributeValueMemberS{Value: yieldEvent.SignalID},
 				"run_id":     &types.AttributeValueMemberS{Value: runID},
-				"created_at": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+				"created_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 			}
 			transactItems = append(transactItems, types.TransactWriteItem{
 				Put: &types.Put{
@@ -400,7 +411,7 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 		"event_id":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID)},
 		"event_type": &types.AttributeValueMemberS{Value: string(starflow.EventTypeResume)},
 		"metadata":   &types.AttributeValueMemberS{Value: string(resumeEventData)},
-		"timestamp":  &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+		"timestamp":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 	}
 
 	// Execute atomic transaction: delete signal, insert event, update run
@@ -441,7 +452,7 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 					ExpressionAttributeValues: map[string]types.AttributeValue{
 						":status":     &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
 						":empty":      &types.AttributeValueMemberS{Value: ""},
-						":updated_at": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+						":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 						":inc":        &types.AttributeValueMemberN{Value: "1"},
 					},
 				},
@@ -491,8 +502,8 @@ func (s *DynamoDBStore) GetEvents(ctx context.Context, runID string) ([]*starflo
 			continue
 		}
 
-		// Parse timestamp
-		eventTime, err := time.Parse(time.RFC3339, timestamp.Value)
+		// Parse timestamp using our consistent format
+		eventTime, err := parseTimestamp(timestamp.Value)
 		if err != nil {
 			continue
 		}
@@ -569,7 +580,7 @@ func (s *DynamoDBStore) FinishRun(ctx context.Context, runID string, output *any
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":status":     &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)},
 			":output":     &types.AttributeValueMemberB{Value: output.Value},
-			":updated_at": &types.AttributeValueMemberS{Value: time.Now().UTC().Format(time.RFC3339)},
+			":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 		},
 	})
 
@@ -613,7 +624,7 @@ func (s *DynamoDBStore) itemToRun(item map[string]types.AttributeValue) (*starfl
 
 	if createdAtAttr, exists := item["created_at"]; exists {
 		if createdAt, ok := createdAtAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, createdAt.Value); err == nil {
+			if t, err := parseTimestamp(createdAt.Value); err == nil {
 				run.CreatedAt = t
 			}
 		}
@@ -621,7 +632,7 @@ func (s *DynamoDBStore) itemToRun(item map[string]types.AttributeValue) (*starfl
 
 	if updatedAtAttr, exists := item["updated_at"]; exists {
 		if updatedAt, ok := updatedAtAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, updatedAt.Value); err == nil {
+			if t, err := parseTimestamp(updatedAt.Value); err == nil {
 				run.UpdatedAt = t
 			}
 		}
@@ -649,7 +660,7 @@ func (s *DynamoDBStore) itemToRun(item map[string]types.AttributeValue) (*starfl
 
 	if leaseUntilAttr, exists := item["lease_until"]; exists {
 		if leaseUntil, ok := leaseUntilAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, leaseUntil.Value); err == nil {
+			if t, err := parseTimestamp(leaseUntil.Value); err == nil {
 				run.LeaseUntil = &t
 			}
 		}
