@@ -131,7 +131,7 @@ func (s *MemoryStore) ClaimRun(ctx context.Context, runID string, workerID strin
 	}
 
 	// Check if run is already claimed and lease is still valid
-	if run.WorkerID != "" && run.LeaseUntil != nil && time.Now().Before(*run.LeaseUntil) {
+	if run.WorkerID != "" && run.WorkerID != workerID && run.LeaseUntil != nil && time.Now().Before(*run.LeaseUntil) {
 		return false, nil
 	}
 

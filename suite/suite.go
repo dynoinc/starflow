@@ -135,17 +135,17 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		// First claim should succeed
-		ok, err := s.ClaimRun(ctx, id, "w1", time.Now().Add(100*time.Millisecond))
+		ok, err := s.ClaimRun(ctx, id, "w1", time.Now().Add(15*time.Second))
 		require.NoError(t, err)
 		require.True(t, ok)
 
-		// Claim with same worker ID should fail (MemoryStore doesn't allow renewal)
-		ok, err = s.ClaimRun(ctx, id, "w1", time.Now().Add(100*time.Millisecond))
+		// Claim with same worker ID should succeed
+		ok, err = s.ClaimRun(ctx, id, "w1", time.Now().Add(15*time.Second))
 		require.NoError(t, err)
-		require.False(t, ok)
+		require.True(t, ok)
 
 		// Claim with different worker ID should fail
-		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(100*time.Millisecond))
+		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(15*time.Second))
 		require.NoError(t, err)
 		require.False(t, ok)
 	})

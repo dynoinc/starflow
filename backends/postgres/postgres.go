@@ -309,7 +309,7 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 // ClaimRun attempts to claim a run
 func (s *Store) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
 	query := `UPDATE runs SET status = $1, worker_id = $2, lease_until = $3, updated_at = NOW()
-			  WHERE id = $4 AND (worker_id IS NULL OR lease_until IS NULL OR lease_until < NOW())`
+			  WHERE id = $4 AND (worker_id IS NULL OR worker_id = $2 OR lease_until IS NULL OR lease_until < NOW())`
 
 	result, err := s.db.ExecContext(ctx, query, starflow.RunStatusRunning, workerID, leaseUntil, runID)
 	if err != nil {
