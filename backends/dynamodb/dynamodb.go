@@ -488,6 +488,7 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 	}
 
 	// Execute atomic transaction: delete signal, insert event, update run
+	// Use condition expression to ensure next_event_id hasn't changed
 	_, err = s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
 			{
@@ -514,7 +515,7 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 					Key: map[string]types.AttributeValue{
 						"run_id": &types.AttributeValueMemberS{Value: runID.Value},
 					},
-					UpdateExpression: aws.String("SET #status = :status, #worker_id = :empty, #lease_until = :empty, #updated_at = :updated_at, #next_event_id = #next_event_id + :inc"),
+					UpdateExpression: aws.String("SET #status = :status, #worker_id = :empty, #lease_until = :empty, #updated_at = :updated_at, #next_event_id = :new_next_event_id"),
 					ExpressionAttributeNames: map[string]string{
 						"#status":        "status",
 						"#worker_id":     "worker_id",
@@ -523,17 +524,28 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 						"#next_event_id": "next_event_id",
 					},
 					ExpressionAttributeValues: map[string]types.AttributeValue{
-						":status":     &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
-						":empty":      &types.AttributeValueMemberS{Value: ""},
-						":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
-						":inc":        &types.AttributeValueMemberN{Value: "1"},
+						":status":                 &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
+						":empty":                  &types.AttributeValueMemberS{Value: ""},
+						":updated_at":             &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
+						":new_next_event_id":      &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID+1)},
+						":expected_next_event_id": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID)},
 					},
+					ConditionExpression: aws.String("#next_event_id = :expected_next_event_id"),
 				},
 			},
 		},
 	})
 
 	if err != nil {
+		var transactionCanceledErr *types.TransactionCanceledException
+		if errors.As(err, &transactionCanceledErr) {
+			// Check if the cancellation was due to a condition check failure
+			for _, reason := range transactionCanceledErr.CancellationReasons {
+				if reason.Code != nil && *reason.Code == "ConditionalCheckFailed" {
+					return starflow.ErrConcurrentUpdate
+				}
+			}
+		}
 		return fmt.Errorf("failed to signal run: %w", err)
 	}
 

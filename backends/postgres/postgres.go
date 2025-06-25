@@ -393,6 +393,16 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 		return fmt.Errorf("failed to get run ID for signal: %w", err)
 	}
 
+	// Get current next_event_id for the run
+	var currentNextEventID int64
+	err = tx.QueryRowContext(ctx, "SELECT next_event_id FROM runs WHERE id = $1", runID).Scan(&currentNextEventID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("run with ID %s not found", runID)
+		}
+		return fmt.Errorf("failed to get current next event ID: %w", err)
+	}
+
 	// Insert resume event
 	outputBytes, err := proto.Marshal(output)
 	if err != nil {
@@ -417,9 +427,9 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 		return fmt.Errorf("failed to insert resume event: %w", err)
 	}
 
-	// Update run status
-	updateQuery := `UPDATE runs SET status = $1, next_event_id = next_event_id + 1, updated_at = NOW() WHERE id = $2`
-	_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusPending, runID)
+	// Update run status with the correct next_event_id
+	updateQuery := `UPDATE runs SET status = $1, next_event_id = $2, updated_at = NOW() WHERE id = $3`
+	_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusPending, currentNextEventID+1, runID)
 	if err != nil {
 		return fmt.Errorf("failed to update run: %w", err)
 	}
