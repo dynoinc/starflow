@@ -48,7 +48,7 @@ func main() {
     echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
         return &wrapperspb.StringValue{Value: "echo: " + req.Value}, nil
     }
-    starflow.Register(worker, echoFn, starflow.WithName("echoFn"))
+    starflow.Register(worker, echoFn, starflow.WithName("module.echoFn"))
     
     // Create a client
     client := starflow.NewClient[*wrapperspb.StringValue](store)
@@ -62,7 +62,7 @@ def main(ctx, input):
     stringvalue_proto = proto.file("google/protobuf/wrappers.proto")
     
     # Call our registered function
-    result = echoFn(ctx=ctx, req=stringvalue_proto.StringValue(value=input.value))
+    result = module.echoFn(ctx=ctx, req=stringvalue_proto.StringValue(value=input.value))
     
     # Return the result
     return result
@@ -88,54 +88,6 @@ def main(ctx, input):
     println("Result:", output.Value)
 }
 ```
-
-## Development
-
-### Prerequisites
-
-- Go 1.21 or later
-- Docker (for backend tests)
-
-### Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/dynoinc/starflow.git
-cd starflow
-```
-
-2. Install dependencies:
-```bash
-go mod download
-```
-
-### Testing
-
-Run the full test suite:
-```bash
-just test
-```
-
-Or run specific commands:
-```bash
-just gen    # Generate code and format imports
-just lint   # Run linting and security checks
-```
-
-### Available Commands
-
-- `just` or `just test` - Run the full test suite
-- `just gen` - Generate code and format imports
-- `just lint` - Run linting and security checks
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Run the test suite
-6. Submit a pull request
 
 ## License
 
