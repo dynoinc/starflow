@@ -1,0 +1,38 @@
+name: Test
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+
+    - name: Setup just
+      uses: extractions/setup-just@v3
+
+    - name: Run tests
+      run: just test
+
+    - name: Check for local changes
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "❌ Local changes detected:"
+          git status --porcelain
+          git diff
+          exit 1
+        else
+          echo "✅ No local changes detected"
+        fi 
