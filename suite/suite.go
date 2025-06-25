@@ -3,7 +3,6 @@ package suite
 import (
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/dynoinc/starflow"
 	testpb "github.com/dynoinc/starflow/suite/proto"
@@ -114,45 +113,40 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, starflow.RunStatusYielded, run.Status)
 	})
 
-	t.Run("ClaimRunWithSameWorkerID", func(t *testing.T) {
+	t.Run("ClaimEventUpdatesRunToRunning", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-
-		// First claim should succeed
-		ok, err := s.ClaimRun(ctx, id, "w1", time.Now().Add(15*time.Second))
-		require.NoError(t, err)
-		require.True(t, ok)
-
-		// Claim with same worker ID should succeed
-		ok, err = s.ClaimRun(ctx, id, "w1", time.Now().Add(15*time.Second))
-		require.NoError(t, err)
-		require.True(t, ok)
 
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.Equal(t, "w1", run.WorkerID)
-		require.NotNil(t, run.LeaseUntil)
-		require.True(t, time.Now().Before(*run.LeaseUntil))
 
-		// Claim with different worker ID should fail
-		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(15*time.Second))
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
 		require.NoError(t, err)
-		require.False(t, ok)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusRunning, run.Status)
 	})
 
-	t.Run("ClaimRunWithExpiredLease", func(t *testing.T) {
+	t.Run("ClaimEventWithConcurrentWorkers", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
-		// Claim with past lease time should succeed
-		ok, err := s.ClaimRun(ctx, id, "w1", time.Now().Add(-1*time.Second))
+		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.True(t, ok)
 
-		// Now claim with a different worker ID should succeed
-		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(15*time.Second))
+		// First claim should succeed
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
 		require.NoError(t, err)
-		require.True(t, ok)
+
+		// Second claim should fail due to optimistic concurrency
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
+		require.Error(t, err)
+		require.Equal(t, starflow.ErrConcurrentUpdate, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusRunning, run.Status)
 	})
 
 	t.Run("SignalWithNonExistentSignalID", func(t *testing.T) {
@@ -180,12 +174,10 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		err = s.Signal(ctx, "test-signal", output)
 		require.NoError(t, err)
 
-		// Verify the run status changed to PENDING and workerID is cleared
+		// Verify the run status changed to PENDING
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, starflow.RunStatusPending, run.Status)
-		require.Empty(t, run.WorkerID)
-		require.Nil(t, run.LeaseUntil)
 	})
 
 	t.Run("SignalTwiceWithSameSignalID", func(t *testing.T) {

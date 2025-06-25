@@ -251,40 +251,70 @@ func (s *DynamoDBStore) ListRuns(ctx context.Context, statuses ...starflow.RunSt
 	return allRuns, nil
 }
 
-// ClaimRun attempts to claim a run for a worker. Returns true if successful.
-func (s *DynamoDBStore) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
-	conditionExpression := "attribute_not_exists(#worker_id) OR #worker_id = :worker_id OR #lease_until < :now"
-	updateExpression := "SET #worker_id = :worker_id, #lease_until = :lease_until, #updated_at = :updated_at"
+// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
+func (s *DynamoDBStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+	var allRuns []*starflow.Run
 
-	_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(s.tableName),
-		Key: map[string]types.AttributeValue{
-			"run_id": &types.AttributeValueMemberS{Value: runID},
-		},
-		UpdateExpression:    aws.String(updateExpression),
-		ConditionExpression: aws.String(conditionExpression),
+	// Query for pending runs using the status-index GSI
+	pendingInput := &dynamodb.QueryInput{
+		TableName:              aws.String(s.tableName),
+		IndexName:              aws.String("status-index"),
+		KeyConditionExpression: aws.String("#status = :status"),
 		ExpressionAttributeNames: map[string]string{
-			"#worker_id":   "worker_id",
-			"#lease_until": "lease_until",
-			"#updated_at":  "updated_at",
+			"#status": "status",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":worker_id":   &types.AttributeValueMemberS{Value: workerID},
-			":lease_until": &types.AttributeValueMemberS{Value: formatTimestamp(leaseUntil)},
-			":updated_at":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
-			":now":         &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
+			":status": &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
 		},
-	})
-
-	if err != nil {
-		var conditionFailedErr *types.ConditionalCheckFailedException
-		if errors.As(err, &conditionFailedErr) {
-			return false, nil // Run is already claimed by another worker
-		}
-		return false, fmt.Errorf("failed to claim run: %w", err)
 	}
 
-	return true, nil
+	pendingResult, err := s.client.Query(ctx, pendingInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending runs: %w", err)
+	}
+
+	for _, item := range pendingResult.Items {
+		run, err := s.itemToRun(item)
+		if err != nil {
+			continue
+		}
+		allRuns = append(allRuns, run)
+	}
+
+	// Query for stale runs (updated more than staleThreshold ago)
+	staleTime := time.Now().Add(-staleThreshold)
+	staleTimeStr := formatTimestamp(staleTime)
+
+	// For DynamoDB, we'll need to scan and filter by updated_at
+	// This is less efficient but necessary for the time-based query
+	scanInput := &dynamodb.ScanInput{
+		TableName:        aws.String(s.tableName),
+		FilterExpression: aws.String("#status IN (:running, :yielded) AND #updated_at < :stale_time"),
+		ExpressionAttributeNames: map[string]string{
+			"#status":     "status",
+			"#updated_at": "updated_at",
+		},
+		ExpressionAttributeValues: map[string]types.AttributeValue{
+			":running":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusRunning)},
+			":yielded":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusYielded)},
+			":stale_time": &types.AttributeValueMemberS{Value: staleTimeStr},
+		},
+	}
+
+	staleResult, err := s.client.Scan(ctx, scanInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan stale runs: %w", err)
+	}
+
+	for _, item := range staleResult.Items {
+		run, err := s.itemToRun(item)
+		if err != nil {
+			continue
+		}
+		allRuns = append(allRuns, run)
+	}
+
+	return allRuns, nil
 }
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
@@ -338,6 +368,10 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 			expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)}
 			expressionAttributeValues[":output"] = &types.AttributeValueMemberB{Value: finishEvent.Output.Value}
 		}
+	case starflow.EventTypeClaim:
+		updateExpression += ", #status = :status"
+		expressionAttributeNames["#status"] = "status"
+		expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusRunning)}
 	}
 
 	// Add the condition check
@@ -599,6 +633,10 @@ func (s *DynamoDBStore) deserializeEventMetadata(eventType starflow.EventType, m
 		var event starflow.FinishEvent
 		err := json.Unmarshal(metadataBytes, &event)
 		return event, err
+	case starflow.EventTypeClaim:
+		var event starflow.ClaimEvent
+		err := json.Unmarshal(metadataBytes, &event)
+		return event, err
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", eventType)
 	}
@@ -661,21 +699,6 @@ func (s *DynamoDBStore) itemToRun(item map[string]types.AttributeValue) (*starfl
 	if outputAttr, exists := item["output"]; exists {
 		if output, ok := outputAttr.(*types.AttributeValueMemberB); ok {
 			run.Output = &anypb.Any{Value: output.Value}
-		}
-	}
-
-	// Extract worker fields
-	if workerIDAttr, exists := item["worker_id"]; exists {
-		if workerID, ok := workerIDAttr.(*types.AttributeValueMemberS); ok {
-			run.WorkerID = workerID.Value
-		}
-	}
-
-	if leaseUntilAttr, exists := item["lease_until"]; exists {
-		if leaseUntil, ok := leaseUntilAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := parseTimestamp(leaseUntil.Value); err == nil {
-				run.LeaseUntil = &t
-			}
 		}
 	}
 

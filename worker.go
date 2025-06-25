@@ -168,7 +168,7 @@ func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDe
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	runs, err := w.store.ListRuns(ctx, RunStatusPending)
+	runs, err := w.store.ListRunsForClaiming(ctx, 30*time.Second)
 	if err != nil {
 		return
 	}
@@ -178,17 +178,25 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 		wg.Add(1)
 		go func(run *Run) {
 			defer wg.Done()
-			leaseUntil := time.Now().Add(15 * time.Second)
 
 			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
-			ok, err := w.store.ClaimRun(ctx, run.ID, w.workerID, leaseUntil)
-			if err != nil || !ok {
+			// Try to claim the run by recording a ClaimEvent
+			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, ClaimEvent{})
+			if err != nil {
+				// Another worker claimed it first
 				return
 			}
 
-			if _, err := runThread(ctx, w, run); err != nil {
+			// Get the updated run with the new NextEventID
+			updatedRun, err := w.store.GetRun(ctx, run.ID)
+			if err != nil {
+				slog.Error("failed to get updated run", "run_id", run.ID, "error", err)
+				return
+			}
+
+			if _, err := runThread(ctx, w, updatedRun); err != nil {
 				slog.Error("failed to resume run", "run_id", run.ID, "error", err)
 			}
 		}(r)

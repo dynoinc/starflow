@@ -53,10 +53,6 @@ type Run struct {
 	// Set when finished.
 	Output *anypb.Any
 	Error  error
-
-	// Set when claimed by a worker
-	WorkerID   string
-	LeaseUntil *time.Time
 }
 
 // EventType represents the type of an event in the execution history.
@@ -71,6 +67,7 @@ const (
 	EventTypeYield   EventType = "YIELD"
 	EventTypeResume  EventType = "RESUME"
 	EventTypeFinish  EventType = "FINISH"
+	EventTypeClaim   EventType = "CLAIM"
 )
 
 // EventMetadata interface for different event types
@@ -132,6 +129,12 @@ type FinishEvent struct {
 
 func (f FinishEvent) EventType() EventType { return EventTypeFinish }
 
+type ClaimEvent struct {
+	// No fields needed - just the event type indicates claiming
+}
+
+func (c ClaimEvent) EventType() EventType { return EventTypeClaim }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp time.Time
@@ -178,4 +181,9 @@ func (e Event) AsResumeEvent() (ResumeEvent, bool) {
 func (e Event) AsFinishEvent() (FinishEvent, bool) {
 	finishEvent, ok := e.Metadata.(FinishEvent)
 	return finishEvent, ok
+}
+
+func (e Event) AsClaimEvent() (ClaimEvent, bool) {
+	claimEvent, ok := e.Metadata.(ClaimEvent)
+	return claimEvent, ok
 }

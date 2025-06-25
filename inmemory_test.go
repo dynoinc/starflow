@@ -121,28 +121,25 @@ func (s *MemoryStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 	return result, nil
 }
 
-// ClaimRun attempts to mark a run as RUNNING with worker id and lease. Returns true if successful.
-func (s *MemoryStore) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
+func (s *MemoryStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	run, exists := s.runs[runID]
-	if !exists {
-		return false, fmt.Errorf("run with ID %s not found", runID)
+	var runs []*starflow.Run
+	staleTime := time.Now().Add(-staleThreshold)
+
+	for _, run := range s.runs {
+		if run.Status == starflow.RunStatusPending ||
+			(run.Status == starflow.RunStatusRunning && run.UpdatedAt.Before(staleTime)) ||
+			(run.Status == starflow.RunStatusYielded && run.UpdatedAt.Before(staleTime)) {
+			// Create a copy to avoid external modifications
+			runCopy := *run
+			runs = append(runs, &runCopy)
+		}
 	}
 
-	// Check if run is already claimed and lease is still valid
-	if run.WorkerID != "" && run.WorkerID != workerID && run.LeaseUntil != nil && time.Now().Before(*run.LeaseUntil) {
-		return false, nil
-	}
-
-	// Claim the run
-	run.Status = starflow.RunStatusRunning
-	run.WorkerID = workerID
-	run.LeaseUntil = &leaseUntil
-	run.UpdatedAt = time.Now()
-
-	return true, nil
+	return runs, nil
 }
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
@@ -187,6 +184,8 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 			storedRun.Status = starflow.RunStatusCompleted
 			storedRun.Output = finishEvent.Output
 		}
+	case starflow.EventTypeClaim:
+		storedRun.Status = starflow.RunStatusRunning
 	}
 
 	storedRun.NextEventID++
@@ -216,8 +215,6 @@ func (s *MemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any)
 	run.NextEventID++
 	run.Status = starflow.RunStatusPending
 	run.UpdatedAt = time.Now()
-	run.WorkerID = ""
-	run.LeaseUntil = nil
 
 	delete(s.yields, cid)
 	return nil

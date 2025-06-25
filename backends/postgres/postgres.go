@@ -173,19 +173,16 @@ func (s *Store) CreateRun(ctx context.Context, scriptHash string, input *anypb.A
 
 // GetRun retrieves the details of a specific run
 func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error) {
-	query := `SELECT id, script_hash, input, status, next_event_id, worker_id, 
-			  lease_until, output, error_message, created_at, updated_at 
+	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
 			  FROM runs WHERE id = $1`
 
 	var run starflow.Run
 	var inputBytes, outputBytes []byte
 	var errorMsg sql.NullString
-	var leaseUntil sql.NullTime
-	var workerID sql.NullString
 
 	err := s.db.QueryRowContext(ctx, query, runID).Scan(
 		&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
-		&workerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
+		&outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -210,16 +207,6 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 		}
 	}
 
-	// Convert worker ID
-	if workerID.Valid {
-		run.WorkerID = workerID.String
-	}
-
-	// Convert lease time
-	if leaseUntil.Valid {
-		run.LeaseUntil = &leaseUntil.Time
-	}
-
 	// Convert error message
 	if errorMsg.Valid {
 		run.Error = errors.New(errorMsg.String)
@@ -230,22 +217,12 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 
 // ListRuns returns runs matching the specified statuses
 func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
-	var query string
-	var args []interface{}
+	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
+			  FROM runs WHERE status = ANY($1) ORDER BY created_at DESC`
 
-	if len(statuses) == 0 {
-		query = `SELECT id, script_hash, input, status, next_event_id, worker_id, 
-				 lease_until, output, error_message, created_at, updated_at FROM runs`
-	} else {
-		query = `SELECT id, script_hash, input, status, next_event_id, worker_id, 
-				 lease_until, output, error_message, created_at, updated_at 
-				 FROM runs WHERE status = ANY($1)`
-		args = append(args, pq.Array(statuses))
-	}
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query, pq.Array(statuses))
 	if err != nil {
-		return nil, fmt.Errorf("failed to list runs: %w", err)
+		return nil, fmt.Errorf("failed to query runs: %w", err)
 	}
 	defer rows.Close()
 
@@ -254,12 +231,10 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 		var run starflow.Run
 		var inputBytes, outputBytes []byte
 		var errorMsg sql.NullString
-		var leaseUntil sql.NullTime
-		var workerID sql.NullString
 
 		err := rows.Scan(
 			&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
-			&workerID, &leaseUntil, &outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
+			&outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan run: %w", err)
@@ -281,16 +256,6 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 			}
 		}
 
-		// Convert worker ID
-		if workerID.Valid {
-			run.WorkerID = workerID.String
-		}
-
-		// Convert lease time
-		if leaseUntil.Valid {
-			run.LeaseUntil = &leaseUntil.Time
-		}
-
 		// Convert error message
 		if errorMsg.Valid {
 			run.Error = errors.New(errorMsg.String)
@@ -306,25 +271,7 @@ func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([
 	return runs, nil
 }
 
-// ClaimRun attempts to claim a run
-func (s *Store) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
-	query := `UPDATE runs SET status = $1, worker_id = $2, lease_until = $3, updated_at = NOW()
-			  WHERE id = $4 AND (worker_id IS NULL OR worker_id = $2 OR lease_until IS NULL OR lease_until < NOW())`
-
-	result, err := s.db.ExecContext(ctx, query, starflow.RunStatusRunning, workerID, leaseUntil, runID)
-	if err != nil {
-		return false, fmt.Errorf("failed to claim run: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	return rowsAffected > 0, nil
-}
-
-// RecordEvent records an event
+// RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata starflow.EventMetadata) (int64, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -397,6 +344,9 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
 			_, err = tx.ExecContext(ctx, updateQuery, nextEventID+1, runID)
 		}
+	case starflow.EventTypeClaim:
+		updateQuery := `UPDATE runs SET status = $1, next_event_id = $2, updated_at = NOW() WHERE id = $3`
+		_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusRunning, nextEventID+1, runID)
 	default:
 		updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
 		_, err = tx.ExecContext(ctx, updateQuery, nextEventID+1, runID)
@@ -455,9 +405,8 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 		return fmt.Errorf("failed to insert resume event: %w", err)
 	}
 
-	// Update run status and clear worker info
-	updateQuery := `UPDATE runs SET status = $1, worker_id = NULL, lease_until = NULL, 
-					next_event_id = next_event_id + 1, updated_at = NOW() WHERE id = $2`
+	// Update run status
+	updateQuery := `UPDATE runs SET status = $1, next_event_id = next_event_id + 1, updated_at = NOW() WHERE id = $2`
 	_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusPending, runID)
 	if err != nil {
 		return fmt.Errorf("failed to update run: %w", err)
@@ -513,6 +462,68 @@ func (s *Store) GetEvents(ctx context.Context, runID string) ([]*starflow.Event,
 	return events, nil
 }
 
+// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
+func (s *Store) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+	staleTime := time.Now().Add(-staleThreshold)
+
+	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
+			  FROM runs WHERE status = $1 OR (status IN ($2, $3) AND updated_at < $4) ORDER BY created_at DESC`
+
+	rows, err := s.db.QueryContext(ctx, query,
+		starflow.RunStatusPending,
+		starflow.RunStatusRunning,
+		starflow.RunStatusYielded,
+		staleTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query runs for claiming: %w", err)
+	}
+	defer rows.Close()
+
+	var runs []*starflow.Run
+	for rows.Next() {
+		var run starflow.Run
+		var inputBytes, outputBytes []byte
+		var errorMsg sql.NullString
+
+		err := rows.Scan(
+			&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
+			&outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan run: %w", err)
+		}
+
+		// Convert input bytes to anypb.Any
+		if inputBytes != nil {
+			run.Input = &anypb.Any{}
+			if err := proto.Unmarshal(inputBytes, run.Input); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal input: %w", err)
+			}
+		}
+
+		// Convert output bytes to anypb.Any
+		if outputBytes != nil {
+			run.Output = &anypb.Any{}
+			if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal output: %w", err)
+			}
+		}
+
+		// Convert error message
+		if errorMsg.Valid {
+			run.Error = errors.New(errorMsg.String)
+		}
+
+		runs = append(runs, &run)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating runs: %w", err)
+	}
+
+	return runs, nil
+}
+
 // Helper methods
 func (s *Store) hashContent(content []byte) string {
 	hash := sha256.Sum256(content)
@@ -555,6 +566,10 @@ func (s *Store) deserializeEventMetadata(eventType starflow.EventType, metadataB
 		return event, err
 	case starflow.EventTypeFinish:
 		var event starflow.FinishEvent
+		err := json.Unmarshal(metadataBytes, &event)
+		return event, err
+	case starflow.EventTypeClaim:
+		var event starflow.ClaimEvent
 		err := json.Unmarshal(metadataBytes, &event)
 		return event, err
 	default:
