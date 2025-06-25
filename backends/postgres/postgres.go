@@ -218,10 +218,21 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 
 // ListRuns returns runs matching the specified statuses
 func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
-	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
-			  FROM runs WHERE status = ANY($1) ORDER BY created_at DESC`
+	var query string
+	var args []interface{}
 
-	rows, err := s.db.QueryContext(ctx, query, pq.Array(statuses))
+	if len(statuses) == 0 {
+		// If no statuses provided, return all runs
+		query = `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
+				  FROM runs ORDER BY created_at DESC`
+	} else {
+		// Filter by specified statuses
+		query = `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
+				  FROM runs WHERE status = ANY($1) ORDER BY created_at DESC`
+		args = append(args, pq.Array(statuses))
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query runs: %w", err)
 	}
