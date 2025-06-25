@@ -446,7 +446,7 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			if !ok {
 				// still waiting for the signal to resume. ideally we should have not tried to resume the run
 				// but anyways, life happens.
-				return starlark.None, &YieldError{cid: yieldEvent.SignalID()}
+				return starlark.None, yieldEvent.Error()
 			}
 			if err != nil {
 				return starlark.None, err

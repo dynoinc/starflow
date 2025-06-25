@@ -266,8 +266,11 @@ func NewYieldEvent(signalID, runID string) YieldEvent {
 }
 
 func (y YieldEvent) EventType() EventType { return EventTypeYield }
-func (y YieldEvent) SignalID() string     { return y.signalID }
-func (y YieldEvent) RunID() string        { return y.runID }
+func (y YieldEvent) Error() *YieldError {
+	return &YieldError{cid: y.signalID, runID: y.runID}
+}
+func (y YieldEvent) SignalID() string { return y.signalID }
+func (y YieldEvent) RunID() string    { return y.runID }
 
 func (y YieldEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
