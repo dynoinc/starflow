@@ -295,12 +295,15 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	// Add event-specific updates
 	switch eventMetadata.EventType() {
 	case starflow.EventTypeReturn:
-		if returnEvent, ok := eventMetadata.(starflow.ReturnEvent); ok && returnEvent.Error != nil {
-			updateExpression += ", #status = :status, #error = :error"
-			expressionAttributeNames["#status"] = "status"
-			expressionAttributeNames["#error"] = "error"
-			expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusFailed)}
-			expressionAttributeValues[":error"] = &types.AttributeValueMemberS{Value: returnEvent.Error.Error()}
+		if returnEvent, ok := eventMetadata.(starflow.ReturnEvent); ok {
+			_, err := returnEvent.Output()
+			if err != nil {
+				updateExpression += ", #status = :status, #error = :error"
+				expressionAttributeNames["#status"] = "status"
+				expressionAttributeNames["#error"] = "error"
+				expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusFailed)}
+				expressionAttributeValues[":error"] = &types.AttributeValueMemberS{Value: err.Error()}
+			}
 		}
 	case starflow.EventTypeYield:
 		updateExpression += ", #status = :status"
@@ -308,11 +311,14 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusYielded)}
 	case starflow.EventTypeFinish:
 		if finishEvent, ok := eventMetadata.(starflow.FinishEvent); ok {
-			updateExpression += ", #status = :status, #output = :output"
-			expressionAttributeNames["#status"] = "status"
-			expressionAttributeNames["#output"] = "output"
-			expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)}
-			expressionAttributeValues[":output"] = &types.AttributeValueMemberB{Value: finishEvent.Output.Value}
+			output := finishEvent.Output()
+			if output != nil {
+				updateExpression += ", #status = :status, #output = :output"
+				expressionAttributeNames["#status"] = "status"
+				expressionAttributeNames["#output"] = "output"
+				expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)}
+				expressionAttributeValues[":output"] = &types.AttributeValueMemberB{Value: output.Value}
+			}
 		}
 	case starflow.EventTypeClaim:
 		updateExpression += ", #status = :status"
@@ -349,7 +355,7 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	if eventMetadata.EventType() == starflow.EventTypeYield {
 		if yieldEvent, ok := eventMetadata.(starflow.YieldEvent); ok {
 			signalItem := map[string]types.AttributeValue{
-				"signal_id":  &types.AttributeValueMemberS{Value: yieldEvent.SignalID},
+				"signal_id":  &types.AttributeValueMemberS{Value: yieldEvent.SignalID()},
 				"run_id":     &types.AttributeValueMemberS{Value: runID},
 				"created_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 			}
@@ -420,7 +426,7 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 	}
 
 	// Create resume event metadata
-	resumeEvent := starflow.ResumeEvent{SignalID: cid, Output: output}
+	resumeEvent := starflow.NewResumeEvent(cid, output)
 	resumeEventData, _ := json.Marshal(resumeEvent)
 
 	// Prepare the resume event item for the events table

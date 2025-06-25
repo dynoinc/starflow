@@ -146,19 +146,22 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	// Update the runs
 	switch event.Type {
 	case EventTypeReturn:
-		if returnEvent, ok := event.Metadata.(ReturnEvent); ok && returnEvent.Error != nil {
-			storedRun.Status = RunStatusFailed
-			storedRun.Error = returnEvent.Error
+		if returnEvent, ok := event.Metadata.(ReturnEvent); ok {
+			_, err := returnEvent.Output()
+			if err != nil {
+				storedRun.Status = RunStatusFailed
+				storedRun.Error = err
+			}
 		}
 	case EventTypeYield:
 		if yieldEvent, ok := event.Metadata.(YieldEvent); ok {
 			storedRun.Status = RunStatusYielded
-			s.yields[yieldEvent.SignalID] = runID
+			s.yields[yieldEvent.SignalID()] = runID
 		}
 	case EventTypeFinish:
 		if finishEvent, ok := event.Metadata.(FinishEvent); ok {
 			storedRun.Status = RunStatusCompleted
-			storedRun.Output = finishEvent.Output
+			storedRun.Output = finishEvent.Output()
 		}
 	case EventTypeClaim:
 		storedRun.Status = RunStatusRunning
@@ -186,7 +189,7 @@ func (s *InMemoryStore) Signal(ctx context.Context, cid string, output *anypb.An
 
 	s.events[runID] = append(s.events[runID], &Event{
 		Type:     EventTypeResume,
-		Metadata: ResumeEvent{SignalID: cid, Output: output},
+		Metadata: NewResumeEvent(cid, output),
 	})
 
 	run.NextEventID++

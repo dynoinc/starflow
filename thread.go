@@ -152,18 +152,17 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 			if err != nil {
 				return nil, err
 			}
-
-			sleepDuration = time.Until(sleepEvent.WakeupAt)
-		} else {
-			if err := recordEvent(starlarkCtx.ctx, t, SleepEvent{WakeupAt: time.Now().Add(sleepDuration)}); err != nil {
-				return nil, err
-			}
+			sleepDuration = time.Until(sleepEvent.WakeupAt())
 		}
 
 		select {
 		case <-starlarkCtx.ctx.Done():
 			return nil, starlarkCtx.ctx.Err()
 		case <-time.After(sleepDuration):
+		}
+
+		if err := recordEvent(starlarkCtx.ctx, t, NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
+			return nil, err
 		}
 
 		return starlark.None, nil
@@ -188,14 +187,11 @@ func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
 			if err != nil {
 				return nil, err
 			}
+			timestamp = timeNowEvent.Timestamp()
+		}
 
-			timestamp = timeNowEvent.Timestamp
-		} else {
-			// record a time_now event
-			timestamp = time.Now()
-			if err := recordEvent(starlarkCtx.ctx, t, TimeNowEvent{Timestamp: timestamp}); err != nil {
-				return nil, err
-			}
+		if err := recordEvent(starlarkCtx.ctx, t, NewTimeNowEvent(timestamp)); err != nil {
+			return nil, err
 		}
 
 		// Convert to google.protobuf.Timestamp
@@ -233,16 +229,14 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 			if err != nil {
 				return nil, err
 			}
-
-			if randIntEvent.Max != maxInt64 {
-				return nil, fmt.Errorf("expected max value %d, got %d", randIntEvent.Max, maxInt64)
+			if randIntEvent.Max() != maxInt64 {
+				return nil, fmt.Errorf("expected max value %d, got %d", maxInt64, randIntEvent.Max())
 			}
-
-			result = randIntEvent.Result
+			result = randIntEvent.Result()
 		} else {
 			// record a rand_int event
 			result = rand.Int63n(maxInt64)
-			if err := recordEvent(starlarkCtx.ctx, t, RandIntEvent{Max: maxInt64, Result: result}); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewRandIntEvent(maxInt64, result)); err != nil {
 				return nil, err
 			}
 		}
@@ -355,7 +349,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := recordEvent(ctx, t, FinishEvent{Output: outputAny}); err != nil {
+	if err := recordEvent(ctx, t, NewFinishEvent(outputAny)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
@@ -402,12 +396,12 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, err
 			}
 
-			if callEvent.FunctionName != regFn.name {
-				return starlark.None, fmt.Errorf("expected function name %s, got %s", regFn.name, callEvent.FunctionName)
+			if callEvent.FunctionName() != regFn.name {
+				return starlark.None, fmt.Errorf("expected function name %s, got %s", regFn.name, callEvent.FunctionName())
 			}
 
 			expectedProto := proto.Clone(regFn.reqType)
-			if err := callEvent.Input.UnmarshalTo(expectedProto); err != nil {
+			if err := callEvent.Input().UnmarshalTo(expectedProto); err != nil {
 				return starlark.None, fmt.Errorf("failed to unmarshal expected proto: %w", err)
 			}
 
@@ -420,7 +414,7 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
 			}
 
-			if err := recordEvent(starlarkCtx.ctx, t, CallEvent{FunctionName: regFn.name, Input: inputAny}); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewCallEvent(regFn.name, inputAny)); err != nil {
 				return starlark.None, err
 			}
 		}
@@ -430,13 +424,13 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, err
 			}
 
-			if returnEvent.Error != nil {
-				return starlark.None, returnEvent.Error
+			if _, retErr := returnEvent.Output(); retErr != nil {
+				return starlark.None, retErr
 			}
 
-			if returnEvent.Output != nil {
+			if outputAny, _ := returnEvent.Output(); outputAny != nil {
 				respProto := proto.Clone(regFn.resType)
-				if err := returnEvent.Output.UnmarshalTo(respProto); err != nil {
+				if err := outputAny.UnmarshalTo(respProto); err != nil {
 					return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
 				}
 
@@ -455,19 +449,19 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			if !ok {
 				// still waiting for the signal to resume. ideally we should have not tried to resume the run
 				// but anyways, life happens.
-				return starlark.None, &YieldError{cid: yieldEvent.SignalID}
+				return starlark.None, &YieldError{cid: yieldEvent.SignalID()}
 			}
 			if err != nil {
 				return starlark.None, err
 			}
 
-			if resumeEvent.SignalID != yieldEvent.SignalID {
-				return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID, resumeEvent.SignalID)
+			if resumeEvent.SignalID() != yieldEvent.SignalID() {
+				return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID(), resumeEvent.SignalID())
 			}
 
-			if resumeEvent.Output != nil {
+			if resumeEvent.Output() != nil {
 				respProto := proto.Clone(regFn.resType)
-				if err := resumeEvent.Output.UnmarshalTo(respProto); err != nil {
+				if err := resumeEvent.Output().UnmarshalTo(respProto); err != nil {
 					return starlark.None, fmt.Errorf("failed to unmarshal resume event output: %w", err)
 				}
 
@@ -504,16 +498,16 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
 			runID, _ := GetRunID(starlarkCtx.ctx)
-			event = YieldEvent{SignalID: yerr.cid, RunID: runID}
+			event = NewYieldEvent(yerr.cid, runID)
 		} else if callErr != nil {
-			event = ReturnEvent{Error: callErr}
+			event = NewReturnEvent(nil, callErr)
 		} else {
 			outputAny, err := anypb.New(resp)
 			if err != nil {
 				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
 			}
 
-			event = ReturnEvent{Output: outputAny}
+			event = NewReturnEvent(outputAny, nil)
 		}
 
 		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {

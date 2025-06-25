@@ -321,12 +321,12 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 	// Update run based on event type
 	switch eventMetadata.EventType() {
 	case starflow.EventTypeReturn:
-		if returnEvent, ok := eventMetadata.(starflow.ReturnEvent); ok && returnEvent.Error != nil {
-			updateQuery := `UPDATE runs SET status = $1, error_message = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
-			_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusFailed, returnEvent.Error.Error(), nextEventID+1, runID)
-		} else {
-			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
-			_, err = tx.Exec(ctx, updateQuery, nextEventID+1, runID)
+		if returnEvent, ok := eventMetadata.(starflow.ReturnEvent); ok {
+			_, retErr := returnEvent.Output()
+			if retErr != nil {
+				updateQuery := `UPDATE runs SET status = $1, error_message = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
+				_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusFailed, retErr.Error(), nextEventID+1, runID)
+			}
 		}
 	case starflow.EventTypeYield:
 		if yieldEvent, ok := eventMetadata.(starflow.YieldEvent); ok {
@@ -338,23 +338,20 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 			}
 
 			// Insert yield record
-			yieldQuery := `INSERT INTO yields (signal_id, run_id) VALUES ($1, $2)`
-			_, err = tx.Exec(ctx, yieldQuery, yieldEvent.SignalID, runID)
-		} else {
-			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
-			_, err = tx.Exec(ctx, updateQuery, nextEventID+1, runID)
+			yieldQuery := `INSERT INTO yields (signal_id, run_id, created_at) VALUES ($1, $2, NOW())`
+			_, err = tx.Exec(ctx, yieldQuery, yieldEvent.SignalID(), runID)
 		}
 	case starflow.EventTypeFinish:
 		if finishEvent, ok := eventMetadata.(starflow.FinishEvent); ok {
-			outputBytes, marshalErr := proto.Marshal(finishEvent.Output)
-			if marshalErr != nil {
-				return 0, fmt.Errorf("failed to marshal output: %w", marshalErr)
+			output := finishEvent.Output()
+			if output != nil {
+				outputBytes, marshalErr := proto.Marshal(output)
+				if marshalErr != nil {
+					return 0, fmt.Errorf("failed to marshal output: %w", marshalErr)
+				}
+				updateQuery := `UPDATE runs SET status = $1, output = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
+				_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusCompleted, outputBytes, nextEventID+1, runID)
 			}
-			updateQuery := `UPDATE runs SET status = $1, output = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
-			_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusCompleted, outputBytes, nextEventID+1, runID)
-		} else {
-			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
-			_, err = tx.Exec(ctx, updateQuery, nextEventID+1, runID)
 		}
 	case starflow.EventTypeClaim:
 		updateQuery := `UPDATE runs SET status = $1, next_event_id = $2, updated_at = NOW() WHERE id = $3`
@@ -415,7 +412,7 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 		return fmt.Errorf("failed to unmarshal output for resume event: %w", err)
 	}
 
-	resumeEvent := starflow.ResumeEvent{SignalID: cid, Output: resumeOutput}
+	resumeEvent := starflow.NewResumeEvent(cid, resumeOutput)
 	metadataBytes, err := json.Marshal(resumeEvent)
 	if err != nil {
 		return fmt.Errorf("failed to marshal resume event: %w", err)
