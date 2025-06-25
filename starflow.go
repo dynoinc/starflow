@@ -1,3 +1,17 @@
+// Package starflow provides a workflow engine for Go that enables deterministic,
+// resumable, and distributed workflow execution using Starlark scripting. Every
+// execution step is recorded and can be resumed exactly where it left off.
+//
+// # Key Features
+//
+//   - Deterministic & Durable Workflows: Write workflows that are deterministic
+//     and can be replayed from any point with full durability guarantees
+//   - Pluggable Backends: Support for in-memory, DynamoDB, and PostgreSQL storage
+//     with easy extensibility for custom backends
+//   - Distributed Execution: Multiple workers can process workflow runs concurrently
+//   - Resumable Workflows: Workflows can yield and resume based on external signals
+//
+// For more information, see https://github.com/dynoinc/starflow
 package starflow
 
 import (

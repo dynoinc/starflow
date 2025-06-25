@@ -9,9 +9,14 @@ import (
 )
 
 // ErrConcurrentUpdate indicates optimistic concurrency failure.
+// This error is returned when a concurrent update to a run is detected,
+// typically when multiple workers try to claim the same run simultaneously.
 var ErrConcurrentUpdate = errors.New("concurrent update")
 
 // Store is the interface for persisting workflow data.
+// Implementations of this interface provide the storage backend for workflow
+// scripts, runs, events, and signals. The interface is designed to support
+// both in-memory and persistent storage backends like DynamoDB and PostgreSQL.
 type Store interface {
 	// Scripts - Methods to save/restore scripts.
 	//

@@ -71,6 +71,8 @@ func newCustomProtoRegistry() *customProtoRegistry {
 }
 
 // Worker executes pending workflow runs in the background.
+// It polls the store for claimable runs and processes them using registered functions.
+// The worker is parameterized by the input and output types which must be protobuf messages.
 type Worker[Input proto.Message, Output proto.Message] struct {
 	store    Store
 	workerID string
@@ -82,6 +84,8 @@ type Worker[Input proto.Message, Output proto.Message] struct {
 }
 
 // NewWorker creates a worker for a workflow with the given poll interval.
+// The poll interval determines how frequently the worker checks for new runs to process.
+// If poll is 0, it defaults to 1 second.
 func NewWorker[Input proto.Message, Output proto.Message](store Store, poll time.Duration) *Worker[Input, Output] {
 	if poll == 0 {
 		poll = time.Second
@@ -104,6 +108,9 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, poll time
 // Register registers a Go function to be callable from Starlark using generics and reflection.
 // The function must have the signature: func(ctx context.Context, req ReqType) (ResType, error)
 // where ReqType and ResType implement proto.Message.
+//
+// The function will be automatically named based on its package and function name,
+// or you can override this using the WithName option.
 func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
 	w *Worker[Input, Output],
 	fn func(ctx context.Context, req Req) (Res, error),
@@ -163,6 +170,8 @@ func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDe
 }
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
+// This method is useful for manual processing or testing scenarios.
+// For continuous processing, use Start() instead.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 	runs, err := w.store.ClaimableRuns(ctx, 30*time.Second)
 	if err != nil {

@@ -13,6 +13,11 @@ import (
 )
 
 // InMemoryStore is an in-memory implementation of the Store interface.
+// This store is suitable for testing, development, and single-instance deployments.
+// All data is stored in memory and will be lost when the process terminates.
+//
+// The store uses optimistic concurrency control to handle concurrent access
+// and provides thread-safe operations for all Store interface methods.
 type InMemoryStore struct {
 	mu      sync.RWMutex
 	scripts map[string][]byte
@@ -22,6 +27,8 @@ type InMemoryStore struct {
 }
 
 // NewInMemoryStore creates a new InMemoryStore.
+// This is the recommended way to create an in-memory store for testing
+// or single-instance workflow execution.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		scripts: make(map[string][]byte),
