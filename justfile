@@ -1,7 +1,8 @@
 default: test
 
 gen:
-	#!/usr/bin/env bash -e
+	#!/usr/bin/env bash
+	set -e
 	set -x
 
 	for dir in $(find . -name "go.mod" -type f -exec dirname {} \;); do
@@ -9,7 +10,8 @@ gen:
 	done
 
 lint: gen
-	#!/usr/bin/env bash -e
+	#!/usr/bin/env bash
+	set -e
 	set -x
 	
 	for dir in $(find . -name "go.mod" -type f -exec dirname {} \;); do
@@ -17,7 +19,8 @@ lint: gen
 	done
 
 test: lint
-	#!/usr/bin/env bash -e
+	#!/usr/bin/env bash
+	set -e
 	set -x
 
 	for dir in $(find . -name "go.mod" -type f -exec dirname {} \;); do
