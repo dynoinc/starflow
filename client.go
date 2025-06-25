@@ -5,22 +5,18 @@ import (
 	"fmt"
 	"reflect"
 
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
 type Client[Input proto.Message] struct {
-	store  Store
-	tracer trace.Tracer
+	store Store
 }
 
 // NewClient creates a new Workflow executor with the specified input and output types.
 func NewClient[Input proto.Message](store Store) *Client[Input] {
 	return &Client[Input]{
-		store:  store,
-		tracer: otel.Tracer("starflow.client"),
+		store: store,
 	}
 }
 

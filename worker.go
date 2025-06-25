@@ -13,8 +13,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/lithammer/shortuuid/v4"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -78,7 +76,6 @@ type Worker[Input proto.Message, Output proto.Message] struct {
 	workerID string
 	poll     time.Duration
 
-	tracer        trace.Tracer
 	registry      map[string]registeredFn
 	types         map[string]proto.Message
 	protoRegistry protodesc.Resolver
@@ -98,7 +95,6 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, poll time
 		workerID: shortuuid.New(),
 		poll:     poll,
 
-		tracer:        otel.Tracer("starflow.worker"),
 		registry:      make(map[string]registeredFn),
 		types:         make(map[string]proto.Message),
 		protoRegistry: protoRegistry,

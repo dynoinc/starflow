@@ -11,9 +11,6 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/emcfarlane/starlarkproto"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/trace"
 	"go.starlark.net/lib/json"
 	"go.starlark.net/lib/math"
 	"go.starlark.net/starlark"
@@ -333,10 +330,6 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("main must be a function")
 	}
 
-	// Start a span for the main function
-	ctx, span := t.w.tracer.Start(ctx, "main", trace.WithAttributes(attribute.String("run_id", t.run.ID)))
-	defer span.End()
-
 	// Create starlark context value that can be passed to main
 	starlarkCtx := &starlarkContext{ctx: ctx}
 	starlarkInput := starlarkproto.MakeMessage(input)
@@ -393,9 +386,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		if !ok {
 			return starlark.None, fmt.Errorf("first argument must be context, got %s", ctxVal.Type())
 		}
-
-		ctx, wrapFnSpan := t.w.tracer.Start(starlarkCtx.ctx, regFn.name+".wrapFn")
-		defer wrapFnSpan.End()
 
 		req := proto.Clone(regFn.reqType)
 		if reqVal != starlark.None {
@@ -488,13 +478,9 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 
 		var resp proto.Message
 		callFunc := func() error {
-			ctx, span := t.w.tracer.Start(ctx, regFn.name)
-			defer span.End()
-
 			var innerErr error
-			resp, innerErr = regFn.fn(ctx, req)
+			resp, innerErr = regFn.fn(starlarkCtx.ctx, req)
 			if innerErr != nil {
-				span.SetStatus(codes.Error, innerErr.Error())
 				if errors.Is(innerErr, &YieldError{}) {
 					return backoff.Permanent(innerErr)
 				}
@@ -502,7 +488,6 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return innerErr
 			}
 
-			span.SetStatus(codes.Ok, "success")
 			return nil
 		}
 
@@ -517,15 +502,10 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		var event EventMetadata
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
-			wrapFnSpan.SetStatus(codes.Error, yerr.Error())
-
 			event = YieldEvent{SignalID: yerr.cid}
 		} else if callErr != nil {
-			wrapFnSpan.SetStatus(codes.Error, callErr.Error())
-
 			event = ReturnEvent{Error: callErr}
 		} else {
-			wrapFnSpan.SetStatus(codes.Ok, "success")
 			outputAny, err := anypb.New(resp)
 			if err != nil {
 				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
