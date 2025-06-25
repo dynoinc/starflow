@@ -331,7 +331,8 @@ func runThread[Input proto.Message, Output proto.Message](
 	}
 
 	// Create starlark context value that can be passed to main
-	starlarkCtx := &starlarkContext{ctx: ctx}
+	ctxWithRunID := WithRunID(ctx, run.ID)
+	starlarkCtx := &starlarkContext{ctx: ctxWithRunID}
 	starlarkInput := starlarkproto.MakeMessage(input)
 
 	// Call main with context and input
@@ -502,7 +503,8 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		var event EventMetadata
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
-			event = YieldEvent{SignalID: yerr.cid}
+			runID, _ := GetRunID(starlarkCtx.ctx)
+			event = YieldEvent{SignalID: yerr.cid, RunID: runID}
 		} else if callErr != nil {
 			event = ReturnEvent{Error: callErr}
 		} else {

@@ -1,6 +1,7 @@
 package starflow
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,17 +9,36 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 )
 
+// Context key for runID
+type runIDKey struct{}
+
+// WithRunID adds runID to the context
+func WithRunID(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, runIDKey{}, runID)
+}
+
+// GetRunID extracts runID from context
+func GetRunID(ctx context.Context) (string, bool) {
+	runID, ok := ctx.Value(runIDKey{}).(string)
+	return runID, ok
+}
+
 type YieldError struct {
-	cid string
+	cid   string
+	runID string
 }
 
 func (e *YieldError) Error() string {
-	return fmt.Sprintf("yield error: %s", e.cid)
+	return fmt.Sprintf("yield error: %s (run: %s)", e.cid, e.runID)
 }
 
-func NewYieldError() (string, error) {
+func NewYieldError(ctx context.Context) (string, error) {
+	runID, ok := GetRunID(ctx)
+	if !ok {
+		return "", fmt.Errorf("runID not found in context")
+	}
 	cid := shortuuid.New()
-	return cid, &YieldError{cid: cid}
+	return cid, &YieldError{cid: cid, runID: runID}
 }
 
 // RunStatus represents the status of a workflow run.
@@ -112,6 +132,7 @@ func (r RandIntEvent) EventType() EventType { return EventTypeRandInt }
 
 type YieldEvent struct {
 	SignalID string
+	RunID    string
 }
 
 func (y YieldEvent) EventType() EventType { return EventTypeYield }

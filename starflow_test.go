@@ -450,11 +450,12 @@ func TestWorkflow_YieldError(t *testing.T) {
 
 	var called int
 	var cid string
+
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		called++
 		if called == 1 {
 			var err error
-			cid, err = starflow.NewYieldError()
+			cid, err = starflow.NewYieldError(ctx)
 			return nil, err
 		}
 		return &testpb.PingResponse{Message: "resumed"}, nil
