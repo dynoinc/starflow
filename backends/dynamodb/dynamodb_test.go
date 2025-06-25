@@ -66,9 +66,22 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		TableName: &runsTable,
 		AttributeDefinitions: []types.AttributeDefinition{
 			{AttributeName: aws.String("run_id"), AttributeType: types.ScalarAttributeTypeS},
+			{AttributeName: aws.String("status"), AttributeType: types.ScalarAttributeTypeS},
 		},
 		KeySchema: []types.KeySchemaElement{
 			{AttributeName: aws.String("run_id"), KeyType: types.KeyTypeHash},
+		},
+		GlobalSecondaryIndexes: []types.GlobalSecondaryIndex{
+			{
+				IndexName: aws.String("status-index"),
+				KeySchema: []types.KeySchemaElement{
+					{AttributeName: aws.String("status"), KeyType: types.KeyTypeHash},
+					{AttributeName: aws.String("run_id"), KeyType: types.KeyTypeRange},
+				},
+				Projection: &types.Projection{
+					ProjectionType: types.ProjectionTypeAll,
+				},
+			},
 		},
 		BillingMode: types.BillingModePayPerRequest,
 	})

@@ -152,204 +152,62 @@ func (s *DynamoDBStore) GetRun(ctx context.Context, runID string) (*starflow.Run
 		return nil, fmt.Errorf("run with ID %s not found", runID)
 	}
 
-	// Manually construct the run from the item
-	run := &starflow.Run{}
-
-	// Extract basic fields
-	if idAttr, exists := result.Item["run_id"]; exists {
-		if id, ok := idAttr.(*types.AttributeValueMemberS); ok {
-			run.ID = id.Value
-		}
-	}
-
-	if scriptHashAttr, exists := result.Item["script_hash"]; exists {
-		if scriptHash, ok := scriptHashAttr.(*types.AttributeValueMemberS); ok {
-			run.ScriptHash = scriptHash.Value
-		}
-	}
-
-	if statusAttr, exists := result.Item["status"]; exists {
-		if status, ok := statusAttr.(*types.AttributeValueMemberS); ok {
-			run.Status = starflow.RunStatus(status.Value)
-		}
-	}
-
-	if nextEventIDAttr, exists := result.Item["next_event_id"]; exists {
-		if nextEventID, ok := nextEventIDAttr.(*types.AttributeValueMemberN); ok {
-			if _, err := fmt.Sscanf(nextEventID.Value, "%d", &run.NextEventID); err != nil {
-				return nil, fmt.Errorf("failed to parse next_event_id: %w", err)
-			}
-		}
-	}
-
-	if createdAtAttr, exists := result.Item["created_at"]; exists {
-		if createdAt, ok := createdAtAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, createdAt.Value); err == nil {
-				run.CreatedAt = t
-			}
-		}
-	}
-
-	if updatedAtAttr, exists := result.Item["updated_at"]; exists {
-		if updatedAt, ok := updatedAtAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, updatedAt.Value); err == nil {
-				run.UpdatedAt = t
-			}
-		}
-	}
-
-	// Extract anypb.Any fields
-	if inputAttr, exists := result.Item["input"]; exists {
-		if input, ok := inputAttr.(*types.AttributeValueMemberB); ok {
-			run.Input = &anypb.Any{Value: input.Value}
-		}
-	}
-
-	if outputAttr, exists := result.Item["output"]; exists {
-		if output, ok := outputAttr.(*types.AttributeValueMemberB); ok {
-			run.Output = &anypb.Any{Value: output.Value}
-		}
-	}
-
-	// Extract worker fields
-	if workerIDAttr, exists := result.Item["worker_id"]; exists {
-		if workerID, ok := workerIDAttr.(*types.AttributeValueMemberS); ok {
-			run.WorkerID = workerID.Value
-		}
-	}
-
-	if leaseUntilAttr, exists := result.Item["lease_until"]; exists {
-		if leaseUntil, ok := leaseUntilAttr.(*types.AttributeValueMemberS); ok {
-			if t, err := time.Parse(time.RFC3339, leaseUntil.Value); err == nil {
-				run.LeaseUntil = &t
-			}
-		}
-	}
-
-	// Extract error field
-	if errorAttr, exists := result.Item["error"]; exists {
-		if errorStr, ok := errorAttr.(*types.AttributeValueMemberS); ok {
-			run.Error = errors.New(errorStr.Value)
-		}
-	}
-
-	return run, nil
+	return s.itemToRun(result.Item)
 }
 
-// ListRuns returns all runs whose status matches any of the supplied states.
+// ListRuns retrieves all runs, optionally filtered by status.
 func (s *DynamoDBStore) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
-	// For simplicity, we'll scan the table and filter in memory
-	// In a production environment, you might want to use a GSI with status as the partition key
-	input := &dynamodb.ScanInput{
-		TableName: aws.String(s.tableName),
-	}
+	var allRuns []*starflow.Run
 
-	var runs []*starflow.Run
-	paginator := dynamodb.NewScanPaginator(s.client, input)
+	if len(statuses) == 0 {
+		// If no status filter, scan the main table
+		input := &dynamodb.ScanInput{
+			TableName: aws.String(s.tableName),
+		}
 
-	for paginator.HasMorePages() {
-		page, err := paginator.NextPage(ctx)
+		result, err := s.client.Scan(ctx, input)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan runs: %w", err)
 		}
 
-		for _, item := range page.Items {
-			// Manually construct the run from the item (similar to GetRun)
-			run := &starflow.Run{}
-
-			// Extract basic fields
-			if idAttr, exists := item["run_id"]; exists {
-				if id, ok := idAttr.(*types.AttributeValueMemberS); ok {
-					run.ID = id.Value
-				}
+		for _, item := range result.Items {
+			run, err := s.itemToRun(item)
+			if err != nil {
+				continue
+			}
+			allRuns = append(allRuns, run)
+		}
+	} else {
+		// Use the status-index GSI for efficient queries
+		for _, status := range statuses {
+			input := &dynamodb.QueryInput{
+				TableName:              aws.String(s.tableName),
+				IndexName:              aws.String("status-index"),
+				KeyConditionExpression: aws.String("#status = :status"),
+				ExpressionAttributeNames: map[string]string{
+					"#status": "status",
+				},
+				ExpressionAttributeValues: map[string]types.AttributeValue{
+					":status": &types.AttributeValueMemberS{Value: string(status)},
+				},
 			}
 
-			if scriptHashAttr, exists := item["script_hash"]; exists {
-				if scriptHash, ok := scriptHashAttr.(*types.AttributeValueMemberS); ok {
-					run.ScriptHash = scriptHash.Value
-				}
+			result, err := s.client.Query(ctx, input)
+			if err != nil {
+				return nil, fmt.Errorf("failed to query runs by status %s: %w", status, err)
 			}
 
-			if statusAttr, exists := item["status"]; exists {
-				if status, ok := statusAttr.(*types.AttributeValueMemberS); ok {
-					run.Status = starflow.RunStatus(status.Value)
+			for _, item := range result.Items {
+				run, err := s.itemToRun(item)
+				if err != nil {
+					continue
 				}
-			}
-
-			if nextEventIDAttr, exists := item["next_event_id"]; exists {
-				if nextEventID, ok := nextEventIDAttr.(*types.AttributeValueMemberN); ok {
-					if _, err := fmt.Sscanf(nextEventID.Value, "%d", &run.NextEventID); err != nil {
-						continue // Skip invalid items
-					}
-				}
-			}
-
-			if createdAtAttr, exists := item["created_at"]; exists {
-				if createdAt, ok := createdAtAttr.(*types.AttributeValueMemberS); ok {
-					if t, err := time.Parse(time.RFC3339, createdAt.Value); err == nil {
-						run.CreatedAt = t
-					}
-				}
-			}
-
-			if updatedAtAttr, exists := item["updated_at"]; exists {
-				if updatedAt, ok := updatedAtAttr.(*types.AttributeValueMemberS); ok {
-					if t, err := time.Parse(time.RFC3339, updatedAt.Value); err == nil {
-						run.UpdatedAt = t
-					}
-				}
-			}
-
-			// Extract anypb.Any fields
-			if inputAttr, exists := item["input"]; exists {
-				if input, ok := inputAttr.(*types.AttributeValueMemberB); ok {
-					run.Input = &anypb.Any{Value: input.Value}
-				}
-			}
-
-			if outputAttr, exists := item["output"]; exists {
-				if output, ok := outputAttr.(*types.AttributeValueMemberB); ok {
-					run.Output = &anypb.Any{Value: output.Value}
-				}
-			}
-
-			// Extract worker fields
-			if workerIDAttr, exists := item["worker_id"]; exists {
-				if workerID, ok := workerIDAttr.(*types.AttributeValueMemberS); ok {
-					run.WorkerID = workerID.Value
-				}
-			}
-
-			if leaseUntilAttr, exists := item["lease_until"]; exists {
-				if leaseUntil, ok := leaseUntilAttr.(*types.AttributeValueMemberS); ok {
-					if t, err := time.Parse(time.RFC3339, leaseUntil.Value); err == nil {
-						run.LeaseUntil = &t
-					}
-				}
-			}
-
-			// Extract error field
-			if errorAttr, exists := item["error"]; exists {
-				if errorStr, ok := errorAttr.(*types.AttributeValueMemberS); ok {
-					run.Error = errors.New(errorStr.Value)
-				}
-			}
-
-			// Filter by status if specified
-			if len(statuses) == 0 {
-				runs = append(runs, run)
-			} else {
-				for _, status := range statuses {
-					if run.Status == status {
-						runs = append(runs, run)
-						break
-					}
-				}
+				allRuns = append(allRuns, run)
 			}
 		}
 	}
 
-	return runs, nil
+	return allRuns, nil
 }
 
 // ClaimRun attempts to claim a run for a worker. Returns true if successful.
@@ -559,6 +417,10 @@ func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.An
 					Key: map[string]types.AttributeValue{
 						"signal_id": &types.AttributeValueMemberS{Value: cid},
 					},
+					ConditionExpression: aws.String("attribute_exists(#signal_id)"),
+					ExpressionAttributeNames: map[string]string{
+						"#signal_id": "signal_id",
+					},
 				},
 			},
 			{
@@ -721,4 +583,89 @@ func (s *DynamoDBStore) FinishRun(ctx context.Context, runID string, output *any
 	}
 
 	return nil
+}
+
+// Helper method to convert DynamoDB item to Run
+func (s *DynamoDBStore) itemToRun(item map[string]types.AttributeValue) (*starflow.Run, error) {
+	run := &starflow.Run{}
+
+	// Extract basic fields
+	if idAttr, exists := item["run_id"]; exists {
+		if id, ok := idAttr.(*types.AttributeValueMemberS); ok {
+			run.ID = id.Value
+		}
+	}
+
+	if scriptHashAttr, exists := item["script_hash"]; exists {
+		if scriptHash, ok := scriptHashAttr.(*types.AttributeValueMemberS); ok {
+			run.ScriptHash = scriptHash.Value
+		}
+	}
+
+	if statusAttr, exists := item["status"]; exists {
+		if status, ok := statusAttr.(*types.AttributeValueMemberS); ok {
+			run.Status = starflow.RunStatus(status.Value)
+		}
+	}
+
+	if nextEventIDAttr, exists := item["next_event_id"]; exists {
+		if nextEventID, ok := nextEventIDAttr.(*types.AttributeValueMemberN); ok {
+			if _, err := fmt.Sscanf(nextEventID.Value, "%d", &run.NextEventID); err != nil {
+				return nil, fmt.Errorf("invalid next_event_id: %w", err)
+			}
+		}
+	}
+
+	if createdAtAttr, exists := item["created_at"]; exists {
+		if createdAt, ok := createdAtAttr.(*types.AttributeValueMemberS); ok {
+			if t, err := time.Parse(time.RFC3339, createdAt.Value); err == nil {
+				run.CreatedAt = t
+			}
+		}
+	}
+
+	if updatedAtAttr, exists := item["updated_at"]; exists {
+		if updatedAt, ok := updatedAtAttr.(*types.AttributeValueMemberS); ok {
+			if t, err := time.Parse(time.RFC3339, updatedAt.Value); err == nil {
+				run.UpdatedAt = t
+			}
+		}
+	}
+
+	// Extract anypb.Any fields
+	if inputAttr, exists := item["input"]; exists {
+		if input, ok := inputAttr.(*types.AttributeValueMemberB); ok {
+			run.Input = &anypb.Any{Value: input.Value}
+		}
+	}
+
+	if outputAttr, exists := item["output"]; exists {
+		if output, ok := outputAttr.(*types.AttributeValueMemberB); ok {
+			run.Output = &anypb.Any{Value: output.Value}
+		}
+	}
+
+	// Extract worker fields
+	if workerIDAttr, exists := item["worker_id"]; exists {
+		if workerID, ok := workerIDAttr.(*types.AttributeValueMemberS); ok {
+			run.WorkerID = workerID.Value
+		}
+	}
+
+	if leaseUntilAttr, exists := item["lease_until"]; exists {
+		if leaseUntil, ok := leaseUntilAttr.(*types.AttributeValueMemberS); ok {
+			if t, err := time.Parse(time.RFC3339, leaseUntil.Value); err == nil {
+				run.LeaseUntil = &t
+			}
+		}
+	}
+
+	// Extract error field
+	if errorAttr, exists := item["error"]; exists {
+		if errorStr, ok := errorAttr.(*types.AttributeValueMemberS); ok {
+			run.Error = errors.New(errorStr.Value)
+		}
+	}
+
+	return run, nil
 }
