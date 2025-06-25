@@ -24,7 +24,7 @@ func newPostgresStore(t *testing.T) starflow.Store {
 	dsn := postgresContainer.MustConnectionString(ctx, "sslmode=disable")
 
 	// Create store
-	store, err := New(dsn)
+	store, err := New(ctx, dsn)
 	require.NoError(t, err)
 	return store
 }
