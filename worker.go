@@ -189,12 +189,13 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
-			if err := recordEvent(ctx, w.store, run, events.NewClaimEvent(w.workerID)); err != nil {
+			recorder := newRecorder(w.store, run)
+			if err := recorder.recordEvent(ctx, events.NewClaimEvent(w.workerID)); err != nil {
 				slog.Error("failed to claim run", "run_id", run.ID, "error", err)
 				return
 			}
 
-			if _, err := runThread(ctx, w, run); err != nil {
+			if _, err := runThread(ctx, w, run, recorder); err != nil {
 				slog.Error("failed to resume run", "run_id", run.ID, "error", err)
 			}
 		}(r)
@@ -249,4 +250,33 @@ func (r *customProtoRegistry) FindFileByPath(path string) (protoreflect.FileDesc
 		return fd, nil
 	}
 	return r.globalRegistry.FindFileByPath(path)
+}
+
+type eventRecorder struct {
+	runID string
+	store Store
+
+	mu          sync.Mutex
+	nextEventID int64
+}
+
+func newRecorder(store Store, run *Run) *eventRecorder {
+	return &eventRecorder{
+		runID:       run.ID,
+		nextEventID: run.NextEventID,
+		store:       store,
+	}
+}
+
+func (r *eventRecorder) recordEvent(ctx context.Context, event events.EventMetadata) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	nextEventID, err := r.store.RecordEvent(ctx, r.runID, r.nextEventID, event)
+	if err != nil {
+		return fmt.Errorf("failed to record event: %w", err)
+	}
+
+	r.nextEventID = nextEventID
+	return nil
 }
