@@ -181,6 +181,11 @@ func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *a
 		return fmt.Errorf("run with ID %s not found", runID)
 	}
 
+	_, exists = s.yields[cid]
+	if !exists {
+		return fmt.Errorf("signal with ID %s not found", cid)
+	}
+
 	s.events[runID] = append(s.events[runID], &Event{
 		Metadata: NewResumeEvent(cid, output),
 	})

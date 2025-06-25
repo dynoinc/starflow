@@ -153,7 +153,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("SignalWithNonExistentSignalID", func(t *testing.T) {
 		output, err := anypb.New(&testpb.PingResponse{Message: "test"})
 		require.NoError(t, err)
-		err = s.Signal(ctx, "non-existent-signal-id", output)
+		err = s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
 		require.Error(t, err, "signaling with non-existent signal ID should fail")
 	})
 
@@ -172,7 +172,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		// Since we can't directly delete from the store, we'll test the signal behavior
 		// by checking that the run status changes correctly
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
-		err = s.Signal(ctx, "test-signal", output)
+		err = s.Signal(ctx, id, "test-signal", output)
 		require.NoError(t, err)
 
 		// Verify the run status changed to PENDING
@@ -194,11 +194,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// First signal should succeed
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
-		err = s.Signal(ctx, "test-signal", output)
+		err = s.Signal(ctx, id, "test-signal", output)
 		require.NoError(t, err)
 
 		// Second signal with same ID should fail
-		err = s.Signal(ctx, "test-signal", output)
+		err = s.Signal(ctx, id, "test-signal", output)
 		require.Error(t, err, "signaling twice with same signal ID should fail")
 	})
 

@@ -13,6 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/lithammer/shortuuid/v4"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/dynoinc/starflow"
@@ -389,99 +390,122 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	return nextEventID + 1, nil
 }
 
-// Signal handles signaling a run with a signal ID.
-func (s *DynamoDBStore) Signal(ctx context.Context, cid string, output *anypb.Any) error {
-	// First find the run associated with this signal ID from the signals table
-	input := &dynamodb.GetItemInput{
+// Signal signals a run to resume
+func (s *DynamoDBStore) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
+	// First, try to find the run ID by looking up the signal
+	var actualRunID string
+
+	// Try to get run ID from signals table using cid
+	getSignalInput := &dynamodb.GetItemInput{
 		TableName: aws.String(s.signalsTableName),
 		Key: map[string]types.AttributeValue{
 			"signal_id": &types.AttributeValueMemberS{Value: cid},
 		},
 	}
 
-	result, err := s.client.GetItem(ctx, input)
+	signalResult, err := s.client.GetItem(ctx, getSignalInput)
 	if err != nil {
-		return fmt.Errorf("failed to find signal: %w", err)
+		return fmt.Errorf("failed to get signal: %w", err)
 	}
 
-	if result.Item == nil {
-		return fmt.Errorf("signal with ID %s not found", cid)
+	if signalResult.Item != nil {
+		if runIDAttr, exists := signalResult.Item["run_id"]; exists {
+			if runIDVal, ok := runIDAttr.(*types.AttributeValueMemberS); ok {
+				actualRunID = runIDVal.Value
+			}
+		}
 	}
 
-	// Get the run ID from the signal record
-	runIDAttr, exists := result.Item["run_id"]
-	if !exists {
-		return fmt.Errorf("signal record missing run_id")
+	// If not found by cid, use the provided runID
+	if actualRunID == "" {
+		actualRunID = runID
 	}
 
-	runID, ok := runIDAttr.(*types.AttributeValueMemberS)
-	if !ok {
-		return fmt.Errorf("invalid run_id in signal record")
+	// Get current run to verify it exists and get next_event_id
+	getRunInput := &dynamodb.GetItemInput{
+		TableName: aws.String(s.tableName),
+		Key: map[string]types.AttributeValue{
+			"run_id": &types.AttributeValueMemberS{Value: actualRunID},
+		},
 	}
 
-	// Get the current run to get the next event ID
-	run, err := s.GetRun(ctx, runID.Value)
+	runResult, err := s.client.GetItem(ctx, getRunInput)
 	if err != nil {
 		return fmt.Errorf("failed to get run: %w", err)
 	}
 
-	// Create resume event metadata
-	resumeEvent := starflow.NewResumeEvent(cid, output)
-	resumeEventData, _ := json.Marshal(resumeEvent)
-
-	// Prepare the resume event item for the events table
-	eventItem := map[string]types.AttributeValue{
-		"run_id":     &types.AttributeValueMemberS{Value: runID.Value},
-		"event_id":   &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID)},
-		"event_type": &types.AttributeValueMemberS{Value: string(starflow.EventTypeResume)},
-		"metadata":   &types.AttributeValueMemberS{Value: string(resumeEventData)},
-		"timestamp":  &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
+	if runResult.Item == nil {
+		return fmt.Errorf("run with ID %s not found", actualRunID)
 	}
 
-	// Execute atomic transaction: delete signal, insert event, update run
-	// Use condition expression to ensure next_event_id hasn't changed
+	// Extract next_event_id
+	var currentNextEventID int64
+	if nextEventIDAttr, exists := runResult.Item["next_event_id"]; exists {
+		if nextEventIDVal, ok := nextEventIDAttr.(*types.AttributeValueMemberN); ok {
+			if _, err := fmt.Sscanf(nextEventIDVal.Value, "%d", &currentNextEventID); err != nil {
+				return fmt.Errorf("invalid next_event_id: %w", err)
+			}
+		}
+	}
+
+	// Marshal output for resume event
+	outputBytes, err := proto.Marshal(output)
+	if err != nil {
+		return fmt.Errorf("failed to marshal output: %w", err)
+	}
+
+	// Create resume event
+	resumeOutput := &anypb.Any{}
+	if err := proto.Unmarshal(outputBytes, resumeOutput); err != nil {
+		return fmt.Errorf("failed to unmarshal output for resume event: %w", err)
+	}
+
+	resumeEvent := starflow.NewResumeEvent(cid, resumeOutput)
+	metadataBytes, err := json.Marshal(resumeEvent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal resume event: %w", err)
+	}
+
+	// Use a transaction to update run and add resume event
 	_, err = s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
 		TransactItems: []types.TransactWriteItem{
 			{
-				Delete: &types.Delete{
-					TableName: aws.String(s.signalsTableName),
+				Update: &types.Update{
+					TableName: aws.String(s.tableName),
 					Key: map[string]types.AttributeValue{
-						"signal_id": &types.AttributeValueMemberS{Value: cid},
+						"run_id": &types.AttributeValueMemberS{Value: actualRunID},
 					},
-					ConditionExpression: aws.String("attribute_exists(#signal_id)"),
+					UpdateExpression: aws.String("SET #status = :status, #next_event_id = :new_next_event_id, #updated_at = :updated_at"),
 					ExpressionAttributeNames: map[string]string{
-						"#signal_id": "signal_id",
+						"#status":        "status",
+						"#next_event_id": "next_event_id",
+						"#updated_at":    "updated_at",
+					},
+					ExpressionAttributeValues: map[string]types.AttributeValue{
+						":status":            &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
+						":new_next_event_id": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", currentNextEventID+1)},
+						":updated_at":        &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 					},
 				},
 			},
 			{
 				Put: &types.Put{
 					TableName: aws.String(s.eventsTableName),
-					Item:      eventItem,
+					Item: map[string]types.AttributeValue{
+						"run_id":    &types.AttributeValueMemberS{Value: actualRunID},
+						"event_id":  &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", currentNextEventID)},
+						"type":      &types.AttributeValueMemberS{Value: string(starflow.EventTypeResume)},
+						"metadata":  &types.AttributeValueMemberS{Value: string(metadataBytes)},
+						"timestamp": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
+					},
 				},
 			},
 			{
-				Update: &types.Update{
-					TableName: aws.String(s.tableName),
+				Delete: &types.Delete{
+					TableName: aws.String(s.signalsTableName),
 					Key: map[string]types.AttributeValue{
-						"run_id": &types.AttributeValueMemberS{Value: runID.Value},
+						"signal_id": &types.AttributeValueMemberS{Value: cid},
 					},
-					UpdateExpression: aws.String("SET #status = :status, #worker_id = :empty, #lease_until = :empty, #updated_at = :updated_at, #next_event_id = :new_next_event_id"),
-					ExpressionAttributeNames: map[string]string{
-						"#status":        "status",
-						"#worker_id":     "worker_id",
-						"#lease_until":   "lease_until",
-						"#updated_at":    "updated_at",
-						"#next_event_id": "next_event_id",
-					},
-					ExpressionAttributeValues: map[string]types.AttributeValue{
-						":status":                 &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
-						":empty":                  &types.AttributeValueMemberS{Value: ""},
-						":updated_at":             &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
-						":new_next_event_id":      &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID+1)},
-						":expected_next_event_id": &types.AttributeValueMemberN{Value: fmt.Sprintf("%d", run.NextEventID)},
-					},
-					ConditionExpression: aws.String("#next_event_id = :expected_next_event_id"),
 				},
 			},
 		},

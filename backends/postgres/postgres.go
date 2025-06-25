@@ -373,29 +373,29 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 }
 
 // Signal signals a run to resume
-func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error {
+func (s *Store) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	// Get run ID for the signal
-	var runID string
-	err = tx.QueryRow(ctx, "SELECT run_id FROM yields WHERE signal_id = $1", cid).Scan(&runID)
+	// Get run ID for the signal - try both cid and runID lookup
+	var actualRunID string
+	err = tx.QueryRow(ctx, "SELECT run_id FROM yields WHERE signal_id = $1 OR run_id = $2", cid, runID).Scan(&actualRunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("signal with ID %s not found", cid)
+			return fmt.Errorf("signal with ID %s or run ID %s not found", cid, runID)
 		}
 		return fmt.Errorf("failed to get run ID for signal: %w", err)
 	}
 
 	// Get current next_event_id for the run
 	var currentNextEventID int64
-	err = tx.QueryRow(ctx, "SELECT next_event_id FROM runs WHERE id = $1", runID).Scan(&currentNextEventID)
+	err = tx.QueryRow(ctx, "SELECT next_event_id FROM runs WHERE id = $1", actualRunID).Scan(&currentNextEventID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("run with ID %s not found", runID)
+			return fmt.Errorf("run with ID %s not found", actualRunID)
 		}
 		return fmt.Errorf("failed to get current next event ID: %w", err)
 	}
@@ -419,21 +419,21 @@ func (s *Store) Signal(ctx context.Context, cid string, output *anypb.Any) error
 	}
 
 	eventQuery := `INSERT INTO events (run_id, type, metadata) VALUES ($1, $2, $3)`
-	_, err = tx.Exec(ctx, eventQuery, runID, starflow.EventTypeResume, metadataBytes)
+	_, err = tx.Exec(ctx, eventQuery, actualRunID, starflow.EventTypeResume, metadataBytes)
 	if err != nil {
 		return fmt.Errorf("failed to insert resume event: %w", err)
 	}
 
 	// Update run status with the correct next_event_id
 	updateQuery := `UPDATE runs SET status = $1, next_event_id = $2, updated_at = NOW() WHERE id = $3`
-	_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusPending, currentNextEventID+1, runID)
+	_, err = tx.Exec(ctx, updateQuery, starflow.RunStatusPending, currentNextEventID+1, actualRunID)
 	if err != nil {
 		return fmt.Errorf("failed to update run: %w", err)
 	}
 
 	// Delete yield record
-	deleteQuery := `DELETE FROM yields WHERE signal_id = $1`
-	_, err = tx.Exec(ctx, deleteQuery, cid)
+	deleteQuery := `DELETE FROM yields WHERE signal_id = $1 OR run_id = $2`
+	_, err = tx.Exec(ctx, deleteQuery, cid, runID)
 	if err != nil {
 		return fmt.Errorf("failed to delete yield record: %w", err)
 	}
