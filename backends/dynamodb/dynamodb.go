@@ -212,11 +212,6 @@ func (s *DynamoDBStore) ListRuns(ctx context.Context, statuses ...starflow.RunSt
 
 // ClaimRun attempts to claim a run for a worker. Returns true if successful.
 func (s *DynamoDBStore) ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error) {
-	// Use conditional update to ensure atomicity
-	// The condition allows claiming if:
-	// 1. No worker is assigned, OR
-	// 2. The same worker is trying to claim (renewal), OR
-	// 3. The lease has expired
 	conditionExpression := "attribute_not_exists(#worker_id) OR #worker_id = :worker_id OR #lease_until < :now"
 	updateExpression := "SET #worker_id = :worker_id, #lease_until = :lease_until, #updated_at = :updated_at"
 

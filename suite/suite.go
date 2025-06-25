@@ -114,22 +114,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, starflow.RunStatusYielded, run.Status)
 	})
 
-	t.Run("LeaseClaim", func(t *testing.T) {
-		id, err := s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-
-		if ok, _ := s.ClaimRun(ctx, id, "w1", time.Now().Add(20*time.Millisecond)); !ok {
-			t.Fatalf("claim1 fail")
-		}
-		if ok, _ := s.ClaimRun(ctx, id, "w2", time.Now().Add(20*time.Millisecond)); ok {
-			t.Fatalf("claim2 should fail")
-		}
-		time.Sleep(25 * time.Millisecond)
-		if ok, _ := s.ClaimRun(ctx, id, "w2", time.Now().Add(20*time.Millisecond)); !ok {
-			t.Fatalf("claim after lease")
-		}
-	})
-
 	t.Run("ClaimRunWithSameWorkerID", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
@@ -144,6 +128,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 		require.True(t, ok)
 
+		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, "w1", run.WorkerID)
+		require.NotNil(t, run.LeaseUntil)
+		require.True(t, time.Now().Before(*run.LeaseUntil))
+
 		// Claim with different worker ID should fail
 		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(15*time.Second))
 		require.NoError(t, err)
@@ -156,6 +146,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Claim with past lease time should succeed
 		ok, err := s.ClaimRun(ctx, id, "w1", time.Now().Add(-1*time.Second))
+		require.NoError(t, err)
+		require.True(t, ok)
+
+		// Now claim with a different worker ID should succeed
+		ok, err = s.ClaimRun(ctx, id, "w2", time.Now().Add(15*time.Second))
 		require.NoError(t, err)
 		require.True(t, ok)
 	})
