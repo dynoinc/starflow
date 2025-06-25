@@ -434,8 +434,17 @@ func (s *DynamoDBStore) Signal(ctx context.Context, runID, cid string, output *a
 		return fmt.Errorf("failed to get run: %w", err)
 	}
 
+	// Invariant: Signaling with non-existent run ID succeeds silently
 	if runResult.Item == nil {
-		return fmt.Errorf("run with ID %s not found", actualRunID)
+		return nil
+	}
+
+	// Check if signal exists by looking up the signal ID
+	signalExists := signalResult.Item != nil
+
+	// Invariant: Signaling with non-existent signal ID succeeds silently
+	if !signalExists {
+		return nil
 	}
 
 	// Extract next_event_id

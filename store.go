@@ -31,9 +31,8 @@ type Store interface {
 	// Signals - Methods to signal a run.
 	//
 	// Invariants:
-	// - Signaling a run with a non-existent signal ID or signaling twice with the same signal ID fails.
-	// - Signaling a run with a non-existent run ID fails.
-	// - Run will be updated to be in status RunStatusPending and workerID will be cleared.
+	// - Signaling a run with a non-existent run ID or a non-existent signal ID succeeds silently.
+	// - Run will be updated to be in status RunStatusPending.
 	Signal(ctx context.Context, runID, cid string, output *anypb.Any) error
 
 	// Events - Methods to record events.

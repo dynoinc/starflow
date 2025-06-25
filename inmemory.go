@@ -176,16 +176,21 @@ func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *a
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Check if run exists
 	run, exists := s.runs[runID]
 	if !exists {
-		return fmt.Errorf("run with ID %s not found", runID)
+		// Invariant: Signaling with non-existent run ID succeeds silently
+		return nil
 	}
 
-	_, exists = s.yields[cid]
-	if !exists {
-		return fmt.Errorf("signal with ID %s not found", cid)
+	// Check if signal exists
+	_, signalExists := s.yields[cid]
+	if !signalExists {
+		// Invariant: Signaling with non-existent signal ID succeeds silently
+		return nil
 	}
 
+	// Valid signal - add resume event and update run
 	s.events[runID] = append(s.events[runID], &Event{
 		Metadata: NewResumeEvent(cid, output),
 	})

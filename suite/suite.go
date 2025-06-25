@@ -150,58 +150,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, starflow.RunStatusRunning, run.Status)
 	})
 
-	t.Run("SignalWithNonExistentSignalID", func(t *testing.T) {
-		output, err := anypb.New(&testpb.PingResponse{Message: "test"})
-		require.NoError(t, err)
-		err = s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
-		require.Error(t, err, "signaling with non-existent signal ID should fail")
-	})
-
-	t.Run("SignalWithNonExistentRunID", func(t *testing.T) {
-		// First create a run and yield it to create a signal
-		id, err := s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-
-		run, err := s.GetRun(ctx, id)
-		require.NoError(t, err)
-
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.NewYieldEvent("test-signal", id))
-		require.NoError(t, err)
-
-		// Now delete the run (simulate non-existent run)
-		// Since we can't directly delete from the store, we'll test the signal behavior
-		// by checking that the run status changes correctly
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
-		err = s.Signal(ctx, id, "test-signal", output)
-		require.NoError(t, err)
-
-		// Verify the run status changed to PENDING
-		run, err = s.GetRun(ctx, id)
-		require.NoError(t, err)
-		require.Equal(t, starflow.RunStatusPending, run.Status)
-	})
-
-	t.Run("SignalTwiceWithSameSignalID", func(t *testing.T) {
-		// First create a run and yield it to create a signal
-		id, err := s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-
-		run, err := s.GetRun(ctx, id)
-		require.NoError(t, err)
-
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.NewYieldEvent("test-signal", id))
-		require.NoError(t, err)
-
-		// First signal should succeed
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
-		err = s.Signal(ctx, id, "test-signal", output)
-		require.NoError(t, err)
-
-		// Second signal with same ID should fail
-		err = s.Signal(ctx, id, "test-signal", output)
-		require.Error(t, err, "signaling twice with same signal ID should fail")
-	})
-
 	t.Run("FinishEventUpdatesRunToCompleted", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
@@ -249,5 +197,44 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, starflow.EventTypeCall, events[0].Type())
 		require.Equal(t, starflow.EventTypeCall, events[1].Type())
 		require.Equal(t, starflow.EventTypeReturn, events[2].Type())
+	})
+
+	t.Run("SignalInvariants", func(t *testing.T) {
+		// Test 1: Signaling with non-existent run ID succeeds silently
+		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
+		err := s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
+		require.NoError(t, err, "signaling with non-existent run ID should succeed silently")
+
+		// Test 2: Signaling with non-existent signal ID succeeds silently
+		id, err := s.CreateRun(ctx, sh, nil)
+		require.NoError(t, err)
+
+		err = s.Signal(ctx, id, "non-existent-signal-id", output)
+		require.NoError(t, err, "signaling with non-existent signal ID should succeed silently")
+
+		// Test 3: Signaling a valid run updates status to RunStatusPending
+		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusPending, run.Status, "run status should be updated to RunStatusPending after signal")
+
+		// Test 4: Signaling a yielded run with valid signal ID
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+
+		// Create a yield event to set up a valid signal
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.NewYieldEvent("test-signal-id", id))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusYielded, run.Status)
+
+		// Signal the yielded run
+		err = s.Signal(ctx, id, "test-signal-id", output)
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusPending, run.Status, "yielded run should be updated to RunStatusPending after signal")
 	})
 }

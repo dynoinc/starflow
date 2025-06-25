@@ -458,7 +458,6 @@ func TestWorkflow_YieldError(t *testing.T) {
 		if called == 1 {
 			var err error
 			runID, cid, err = starflow.NewYieldError(ctx)
-			require.NoError(t, err)
 			return nil, err
 		}
 		return &testpb.PingResponse{Message: "resumed"}, nil

@@ -380,22 +380,24 @@ func (s *Store) Signal(ctx context.Context, runID, cid string, output *anypb.Any
 	}
 	defer tx.Rollback(ctx)
 
-	// Get run ID for the signal - try both cid and runID lookup
+	// Only proceed if the signal exists
 	var actualRunID string
-	err = tx.QueryRow(ctx, "SELECT run_id FROM yields WHERE signal_id = $1 OR run_id = $2", cid, runID).Scan(&actualRunID)
+	err = tx.QueryRow(ctx, "SELECT run_id FROM yields WHERE signal_id = $1", cid).Scan(&actualRunID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("signal with ID %s or run ID %s not found", cid, runID)
+			// Invariant: Signaling with non-existent signal ID succeeds silently
+			return nil
 		}
-		return fmt.Errorf("failed to get run ID for signal: %w", err)
+		return fmt.Errorf("failed to get signal: %w", err)
 	}
 
-	// Get current next_event_id for the run
+	// Now check if the run exists
 	var currentNextEventID int64
 	err = tx.QueryRow(ctx, "SELECT next_event_id FROM runs WHERE id = $1", actualRunID).Scan(&currentNextEventID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("run with ID %s not found", actualRunID)
+			// Invariant: Signaling with non-existent run ID succeeds silently
+			return nil
 		}
 		return fmt.Errorf("failed to get current next event ID: %w", err)
 	}
@@ -432,8 +434,8 @@ func (s *Store) Signal(ctx context.Context, runID, cid string, output *anypb.Any
 	}
 
 	// Delete yield record
-	deleteQuery := `DELETE FROM yields WHERE signal_id = $1 OR run_id = $2`
-	_, err = tx.Exec(ctx, deleteQuery, cid, runID)
+	deleteQuery := `DELETE FROM yields WHERE signal_id = $1`
+	_, err = tx.Exec(ctx, deleteQuery, cid)
 	if err != nil {
 		return fmt.Errorf("failed to delete yield record: %w", err)
 	}
