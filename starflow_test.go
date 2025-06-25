@@ -51,11 +51,11 @@ def main(ctx, input):
 	require.Len(t, events, 4)
 	require.Equal(t, starflow.EventTypeClaim, events[0].Type)
 	require.Equal(t, starflow.EventTypeCall, events[1].Type)
-	if callEvent, ok := events[1].AsCallEvent(); ok {
+	if callEvent, ok := events[1].Metadata.(starflow.CallEvent); ok {
 		require.Equal(t, "starflow_test.pingFn", callEvent.FunctionName)
 	}
 	require.Equal(t, starflow.EventTypeReturn, events[2].Type)
-	if returnEvent, ok := events[2].AsReturnEvent(); ok {
+	if returnEvent, ok := events[2].Metadata.(starflow.ReturnEvent); ok {
 		require.Empty(t, returnEvent.Error)
 	}
 	require.Equal(t, starflow.EventTypeFinish, events[3].Type)
@@ -138,7 +138,7 @@ def main(ctx, input):
 	for i, event := range events {
 		require.Equal(t, expectedTypes[i], event.Type, "event %d type mismatch", i)
 		expectedFunc := expectedFunctions[i]
-		if callEvent, ok := event.AsCallEvent(); ok {
+		if callEvent, ok := event.Metadata.(starflow.CallEvent); ok {
 			require.Equal(t, expectedFunc, callEvent.FunctionName, "event %d function name mismatch", i)
 		}
 	}
@@ -316,13 +316,13 @@ def main(ctx, input):
 
 	// Second event should be the function call
 	require.Equal(t, starflow.EventTypeCall, events[1].Type)
-	if callEvent, ok := events[1].AsCallEvent(); ok {
+	if callEvent, ok := events[1].Metadata.(starflow.CallEvent); ok {
 		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName)
 	}
 
 	// Third event should be the return with error
 	require.Equal(t, starflow.EventTypeReturn, events[2].Type)
-	if returnEvent, ok := events[2].AsReturnEvent(); ok {
+	if returnEvent, ok := events[2].Metadata.(starflow.ReturnEvent); ok {
 		require.Error(t, returnEvent.Error)
 		require.Contains(t, returnEvent.Error.Error(), "intentional failure: should fail")
 	}

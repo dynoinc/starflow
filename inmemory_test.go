@@ -171,17 +171,17 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 	// Update the runs
 	switch event.Type {
 	case starflow.EventTypeReturn:
-		if returnEvent, ok := event.AsReturnEvent(); ok && returnEvent.Error != nil {
+		if returnEvent, ok := event.Metadata.(starflow.ReturnEvent); ok && returnEvent.Error != nil {
 			storedRun.Status = starflow.RunStatusFailed
 			storedRun.Error = returnEvent.Error
 		}
 	case starflow.EventTypeYield:
-		if yieldEvent, ok := event.AsYieldEvent(); ok {
+		if yieldEvent, ok := event.Metadata.(starflow.YieldEvent); ok {
 			storedRun.Status = starflow.RunStatusYielded
 			s.yields[yieldEvent.SignalID] = runID
 		}
 	case starflow.EventTypeFinish:
-		if finishEvent, ok := event.AsFinishEvent(); ok {
+		if finishEvent, ok := event.Metadata.(starflow.FinishEvent); ok {
 			storedRun.Status = starflow.RunStatusCompleted
 			storedRun.Output = finishEvent.Output
 		}
