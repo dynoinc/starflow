@@ -178,7 +178,11 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 		wg.Add(1)
 		go func(run *Run) {
 			defer wg.Done()
-			leaseUntil := time.Now().Add(5 * time.Second)
+			leaseUntil := time.Now().Add(15 * time.Second)
+
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+
 			ok, err := w.store.ClaimRun(ctx, run.ID, w.workerID, leaseUntil)
 			if err != nil || !ok {
 				return

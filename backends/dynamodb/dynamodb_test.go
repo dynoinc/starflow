@@ -49,6 +49,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 	scriptsTable := "starflow_scripts"
 	runsTable := "starflow_runs"
 	eventsTable := "starflow_events"
+	signalsTable := "starflow_signals"
 
 	_, err = dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
 		TableName: &scriptsTable,
@@ -58,10 +59,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		KeySchema: []types.KeySchemaElement{
 			{AttributeName: aws.String("script_hash"), KeyType: types.KeyTypeHash},
 		},
-		ProvisionedThroughput: &types.ProvisionedThroughput{
-			ReadCapacityUnits:  aws.Int64(1),
-			WriteCapacityUnits: aws.Int64(1),
-		},
+		BillingMode: types.BillingModePayPerRequest,
 	})
 	if err != nil {
 		t.Fatalf("failed to create scripts table: %v", err)
@@ -75,10 +73,7 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 		KeySchema: []types.KeySchemaElement{
 			{AttributeName: aws.String("run_id"), KeyType: types.KeyTypeHash},
 		},
-		ProvisionedThroughput: &types.ProvisionedThroughput{
-			ReadCapacityUnits:  aws.Int64(1),
-			WriteCapacityUnits: aws.Int64(1),
-		},
+		BillingMode: types.BillingModePayPerRequest,
 	})
 	if err != nil {
 		t.Fatalf("failed to create runs table: %v", err)
@@ -94,13 +89,24 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 			{AttributeName: aws.String("run_id"), KeyType: types.KeyTypeHash},
 			{AttributeName: aws.String("event_id"), KeyType: types.KeyTypeRange},
 		},
-		ProvisionedThroughput: &types.ProvisionedThroughput{
-			ReadCapacityUnits:  aws.Int64(1),
-			WriteCapacityUnits: aws.Int64(1),
-		},
+		BillingMode: types.BillingModePayPerRequest,
 	})
 	if err != nil {
 		t.Fatalf("failed to create events table: %v", err)
+	}
+
+	_, err = dynamoClient.CreateTable(ctx, &dynamodb.CreateTableInput{
+		TableName: &signalsTable,
+		AttributeDefinitions: []types.AttributeDefinition{
+			{AttributeName: aws.String("signal_id"), AttributeType: types.ScalarAttributeTypeS},
+		},
+		KeySchema: []types.KeySchemaElement{
+			{AttributeName: aws.String("signal_id"), KeyType: types.KeyTypeHash},
+		},
+		BillingMode: types.BillingModePayPerRequest,
+	})
+	if err != nil {
+		t.Fatalf("failed to create signals table: %v", err)
 	}
 
 	// Wait for tables to be active
@@ -116,8 +122,9 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 	waitForTable(scriptsTable)
 	waitForTable(runsTable)
 	waitForTable(eventsTable)
+	waitForTable(signalsTable)
 
 	suite.RunStoreSuite(t, func(t *testing.T) starflow.Store {
-		return New(dynamoClient, runsTable, scriptsTable, eventsTable)
+		return New(dynamoClient, runsTable, scriptsTable, eventsTable, signalsTable)
 	})
 }
