@@ -552,7 +552,6 @@ func (s *DynamoDBStore) GetEvents(ctx context.Context, runID string) ([]*starflo
 
 		event := &starflow.Event{
 			Timestamp: eventTime,
-			Type:      starflow.EventType(eventType.Value),
 			Metadata:  eventMetadata,
 		}
 

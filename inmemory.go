@@ -137,14 +137,13 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	// Add event to the list
 	event := &Event{
 		Timestamp: time.Now(),
-		Type:      eventMetadata.EventType(),
 		Metadata:  eventMetadata,
 	}
 
 	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
-	switch event.Type {
+	switch event.Type() {
 	case EventTypeReturn:
 		if returnEvent, ok := event.Metadata.(ReturnEvent); ok {
 			_, err := returnEvent.Output()
@@ -188,7 +187,6 @@ func (s *InMemoryStore) Signal(ctx context.Context, cid string, output *anypb.An
 	}
 
 	s.events[runID] = append(s.events[runID], &Event{
-		Type:     EventTypeResume,
 		Metadata: NewResumeEvent(cid, output),
 	})
 

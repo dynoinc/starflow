@@ -246,8 +246,8 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		events, err := s.GetEvents(ctx, id)
 		require.NoError(t, err)
 		require.Len(t, events, 3)
-		require.Equal(t, starflow.EventTypeCall, events[0].Type)
-		require.Equal(t, starflow.EventTypeCall, events[1].Type)
-		require.Equal(t, starflow.EventTypeReturn, events[2].Type)
+		require.Equal(t, starflow.EventTypeCall, events[0].Type())
+		require.Equal(t, starflow.EventTypeCall, events[1].Type())
+		require.Equal(t, starflow.EventTypeReturn, events[2].Type())
 	})
 }

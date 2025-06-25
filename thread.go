@@ -35,8 +35,8 @@ func popEvent[ET EventMetadata, Input proto.Message, Output proto.Message](t *th
 	}
 
 	nextEvent := t.events[0]
-	if nextEvent.Type != zero.EventType() {
-		return zero, fmt.Errorf("expected event type %s, got %s", zero.EventType(), nextEvent.Type), false
+	if nextEvent.Type() != zero.EventType() {
+		return zero, fmt.Errorf("expected event type %s, got %s", zero.EventType(), nextEvent.Type()), false
 	}
 
 	t.events = t.events[1:]
@@ -229,14 +229,11 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 			if err != nil {
 				return nil, err
 			}
-			if randIntEvent.Max() != maxInt64 {
-				return nil, fmt.Errorf("expected max value %d, got %d", maxInt64, randIntEvent.Max())
-			}
 			result = randIntEvent.Result()
 		} else {
 			// record a rand_int event
 			result = rand.Int63n(maxInt64)
-			if err := recordEvent(starlarkCtx.ctx, t, NewRandIntEvent(maxInt64, result)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewRandIntEvent(result)); err != nil {
 				return nil, err
 			}
 		}

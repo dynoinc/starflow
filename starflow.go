@@ -91,14 +91,11 @@ const (
 	EventTypeClaim   EventType = "CLAIM"
 )
 
-// EventMetadata interface for different event types
 type EventMetadata interface {
 	EventType() EventType
 }
 
 // CallEvent metadata
-// Use constructor: NewCallEvent
-// Accessors: FunctionName(), Input()
 type CallEvent struct {
 	functionName string
 	input        *anypb.Any
@@ -112,7 +109,6 @@ func (c CallEvent) EventType() EventType { return EventTypeCall }
 func (c CallEvent) FunctionName() string { return c.functionName }
 func (c CallEvent) Input() *anypb.Any    { return c.input }
 
-// MarshalJSON implements custom JSON marshaling
 func (c CallEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"functionName": c.functionName,
@@ -120,7 +116,6 @@ func (c CallEvent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (c *CallEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		FunctionName string     `json:"functionName"`
@@ -135,8 +130,6 @@ func (c *CallEvent) UnmarshalJSON(data []byte) error {
 }
 
 // ReturnEvent metadata
-// Use constructor: NewReturnEvent
-// Accessor: Output() returns (output, error)
 type ReturnEvent struct {
 	output *anypb.Any
 	err    error
@@ -149,7 +142,6 @@ func NewReturnEvent(output *anypb.Any, err error) ReturnEvent {
 func (r ReturnEvent) EventType() EventType        { return EventTypeReturn }
 func (r ReturnEvent) Output() (*anypb.Any, error) { return r.output, r.err }
 
-// MarshalJSON implements custom JSON marshaling
 func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 	var errStr string
 	if r.err != nil {
@@ -161,7 +153,6 @@ func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (r *ReturnEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Output *anypb.Any `json:"output"`
@@ -178,8 +169,6 @@ func (r *ReturnEvent) UnmarshalJSON(data []byte) error {
 }
 
 // SleepEvent
-// Use constructor: NewSleepEvent
-// Accessor: WakeupAt()
 type SleepEvent struct {
 	wakeupAt time.Time
 }
@@ -191,14 +180,12 @@ func NewSleepEvent(wakeupAt time.Time) SleepEvent {
 func (s SleepEvent) EventType() EventType { return EventTypeSleep }
 func (s SleepEvent) WakeupAt() time.Time  { return s.wakeupAt }
 
-// MarshalJSON implements custom JSON marshaling
 func (s SleepEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"wakeupAt": s.wakeupAt,
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (s *SleepEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		WakeupAt time.Time `json:"wakeupAt"`
@@ -211,8 +198,6 @@ func (s *SleepEvent) UnmarshalJSON(data []byte) error {
 }
 
 // TimeNowEvent
-// Use constructor: NewTimeNowEvent
-// Accessor: Timestamp()
 type TimeNowEvent struct {
 	timestamp time.Time
 }
@@ -224,14 +209,12 @@ func NewTimeNowEvent(timestamp time.Time) TimeNowEvent {
 func (t TimeNowEvent) EventType() EventType { return EventTypeTimeNow }
 func (t TimeNowEvent) Timestamp() time.Time { return t.timestamp }
 
-// MarshalJSON implements custom JSON marshaling
 func (t TimeNowEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"timestamp": t.timestamp,
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (t *TimeNowEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Timestamp time.Time `json:"timestamp"`
@@ -244,46 +227,35 @@ func (t *TimeNowEvent) UnmarshalJSON(data []byte) error {
 }
 
 // RandIntEvent
-// Use constructor: NewRandIntEvent
-// Accessors: Max(), Result()
 type RandIntEvent struct {
-	max    int64
 	result int64
 }
 
-func NewRandIntEvent(max, result int64) RandIntEvent {
-	return RandIntEvent{max: max, result: result}
+func NewRandIntEvent(result int64) RandIntEvent {
+	return RandIntEvent{result: result}
 }
 
 func (r RandIntEvent) EventType() EventType { return EventTypeRandInt }
-func (r RandIntEvent) Max() int64           { return r.max }
 func (r RandIntEvent) Result() int64        { return r.result }
 
-// MarshalJSON implements custom JSON marshaling
 func (r RandIntEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
-		"max":    r.max,
 		"result": r.result,
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (r *RandIntEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Max    int64 `json:"max"`
 		Result int64 `json:"result"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	r.max = aux.Max
 	r.result = aux.Result
 	return nil
 }
 
 // YieldEvent
-// Use constructor: NewYieldEvent
-// Accessors: SignalID(), RunID()
 type YieldEvent struct {
 	signalID string
 	runID    string
@@ -297,7 +269,6 @@ func (y YieldEvent) EventType() EventType { return EventTypeYield }
 func (y YieldEvent) SignalID() string     { return y.signalID }
 func (y YieldEvent) RunID() string        { return y.runID }
 
-// MarshalJSON implements custom JSON marshaling
 func (y YieldEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"signalID": y.signalID,
@@ -305,7 +276,6 @@ func (y YieldEvent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (y *YieldEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		SignalID string `json:"signalID"`
@@ -320,8 +290,6 @@ func (y *YieldEvent) UnmarshalJSON(data []byte) error {
 }
 
 // ResumeEvent
-// Use constructor: NewResumeEvent
-// Accessors: SignalID(), Output()
 type ResumeEvent struct {
 	signalID string
 	output   *anypb.Any
@@ -335,7 +303,6 @@ func (r ResumeEvent) EventType() EventType { return EventTypeResume }
 func (r ResumeEvent) SignalID() string     { return r.signalID }
 func (r ResumeEvent) Output() *anypb.Any   { return r.output }
 
-// MarshalJSON implements custom JSON marshaling
 func (r ResumeEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"signalID": r.signalID,
@@ -343,7 +310,6 @@ func (r ResumeEvent) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		SignalID string     `json:"signalID"`
@@ -358,8 +324,6 @@ func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 }
 
 // FinishEvent
-// Use constructor: NewFinishEvent
-// Accessor: Output()
 type FinishEvent struct {
 	output *anypb.Any
 }
@@ -371,14 +335,12 @@ func NewFinishEvent(output *anypb.Any) FinishEvent {
 func (f FinishEvent) EventType() EventType { return EventTypeFinish }
 func (f FinishEvent) Output() *anypb.Any   { return f.output }
 
-// MarshalJSON implements custom JSON marshaling
 func (f FinishEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"output": f.output,
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Output *anypb.Any `json:"output"`
@@ -391,8 +353,6 @@ func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 }
 
 // ClaimEvent
-// Use constructor: NewClaimEvent
-// Accessor: WorkerID()
 type ClaimEvent struct {
 	workerID string
 }
@@ -404,14 +364,12 @@ func NewClaimEvent(workerID string) ClaimEvent {
 func (c ClaimEvent) EventType() EventType { return EventTypeClaim }
 func (c ClaimEvent) WorkerID() string     { return c.workerID }
 
-// MarshalJSON implements custom JSON marshaling
 func (c ClaimEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"workerID": c.workerID,
 	})
 }
 
-// UnmarshalJSON implements custom JSON unmarshaling
 func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		WorkerID string `json:"workerID"`
@@ -426,6 +384,9 @@ func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp time.Time
-	Type      EventType
 	Metadata  EventMetadata
+}
+
+func (e Event) Type() EventType {
+	return e.Metadata.EventType()
 }

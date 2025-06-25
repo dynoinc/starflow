@@ -458,15 +458,16 @@ func (s *Store) GetEvents(ctx context.Context, runID string) ([]*starflow.Event,
 	var events []*starflow.Event
 	for rows.Next() {
 		var event starflow.Event
+		var eventType starflow.EventType
 		var metadataBytes []byte
 
-		err := rows.Scan(&event.Timestamp, &event.Type, &metadataBytes)
+		err := rows.Scan(&event.Timestamp, &eventType, &metadataBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan event: %w", err)
 		}
 
 		// Deserialize metadata based on event type
-		event.Metadata, err = s.deserializeEventMetadata(event.Type, metadataBytes)
+		event.Metadata, err = s.deserializeEventMetadata(eventType, metadataBytes)
 		if err != nil {
 			return nil, fmt.Errorf("failed to deserialize event metadata: %w", err)
 		}
