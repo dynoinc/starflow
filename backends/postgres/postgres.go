@@ -335,9 +335,9 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 		}
 	case starflow.EventTypeFinish:
 		if finishEvent, ok := eventMetadata.(starflow.FinishEvent); ok {
-			outputBytes, err := proto.Marshal(finishEvent.Output)
-			if err != nil {
-				return 0, fmt.Errorf("failed to marshal output: %w", err)
+			outputBytes, marshalErr := proto.Marshal(finishEvent.Output)
+			if marshalErr != nil {
+				return 0, fmt.Errorf("failed to marshal output: %w", marshalErr)
 			}
 			updateQuery := `UPDATE runs SET status = $1, output = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
 			_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusCompleted, outputBytes, nextEventID+1, runID)
