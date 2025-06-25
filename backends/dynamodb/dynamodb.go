@@ -103,17 +103,11 @@ func (s *DynamoDBStore) GetScript(ctx context.Context, scriptHash string) ([]byt
 
 // CreateRun creates a new run record for a given script.
 func (s *DynamoDBStore) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
-	// First verify the script exists
-	_, err := s.GetScript(ctx, scriptHash)
-	if err != nil {
-		return "", fmt.Errorf("script with hash %s not found", scriptHash)
-	}
-
 	runID := shortuuid.New()
 	now := time.Now()
 
 	// Create the run item directly with proper types
-	item := map[string]types.AttributeValue{
+	runItem := map[string]types.AttributeValue{
 		"run_id":        &types.AttributeValueMemberS{Value: runID},
 		"script_hash":   &types.AttributeValueMemberS{Value: scriptHash},
 		"status":        &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
@@ -123,22 +117,58 @@ func (s *DynamoDBStore) CreateRun(ctx context.Context, scriptHash string, input 
 	}
 
 	if input != nil {
-		item["input"] = &types.AttributeValueMemberB{Value: input.Value}
+		runItem["input"] = &types.AttributeValueMemberB{Value: input.Value}
 	}
 
-	_, err = s.client.PutItem(ctx, &dynamodb.PutItemInput{
-		TableName:           aws.String(s.tableName),
-		Item:                item,
-		ConditionExpression: aws.String("attribute_not_exists(#run_id)"),
-		ExpressionAttributeNames: map[string]string{
-			"#run_id": "run_id",
+	// Use a transaction to atomically verify script exists and create run
+	_, err := s.client.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{
+		TransactItems: []types.TransactWriteItem{
+			{
+				ConditionCheck: &types.ConditionCheck{
+					TableName: aws.String(s.scriptsTableName),
+					Key: map[string]types.AttributeValue{
+						"script_hash": &types.AttributeValueMemberS{Value: scriptHash},
+					},
+					ConditionExpression: aws.String("attribute_exists(#script_hash)"),
+					ExpressionAttributeNames: map[string]string{
+						"#script_hash": "script_hash",
+					},
+				},
+			},
+			{
+				Put: &types.Put{
+					TableName:           aws.String(s.tableName),
+					Item:                runItem,
+					ConditionExpression: aws.String("attribute_not_exists(#run_id)"),
+					ExpressionAttributeNames: map[string]string{
+						"#run_id": "run_id",
+					},
+				},
+			},
 		},
 	})
 
 	if err != nil {
-		var conditionFailedErr *types.ConditionalCheckFailedException
-		if errors.As(err, &conditionFailedErr) {
-			return "", fmt.Errorf("run with ID %s already exists", runID)
+		var transactionCanceledErr *types.TransactionCanceledException
+		if errors.As(err, &transactionCanceledErr) {
+			// Check if the cancellation was due to a condition check failure
+			for _, reason := range transactionCanceledErr.CancellationReasons {
+				if reason.Code != nil {
+					switch *reason.Code {
+					case "ConditionalCheckFailed":
+						if reason.Item != nil {
+							// Check if it's the script check that failed
+							if _, exists := reason.Item["script_hash"]; exists {
+								return "", fmt.Errorf("script with hash %s not found", scriptHash)
+							}
+							// Check if it's the run check that failed
+							if _, exists := reason.Item["run_id"]; exists {
+								return "", fmt.Errorf("run with ID %s already exists", runID)
+							}
+						}
+					}
+				}
+			}
 		}
 		return "", fmt.Errorf("failed to create run: %w", err)
 	}
@@ -571,20 +601,29 @@ func (s *DynamoDBStore) FinishRun(ctx context.Context, runID string, output *any
 		Key: map[string]types.AttributeValue{
 			"run_id": &types.AttributeValueMemberS{Value: runID},
 		},
-		UpdateExpression: aws.String(updateExpression),
+		UpdateExpression:    aws.String(updateExpression),
+		ConditionExpression: aws.String("attribute_exists(#run_id) AND (#status = :pending OR #status = :running OR #status = :yielded)"),
 		ExpressionAttributeNames: map[string]string{
+			"#run_id":     "run_id",
 			"#status":     "status",
 			"#output":     "output",
 			"#updated_at": "updated_at",
 		},
 		ExpressionAttributeValues: map[string]types.AttributeValue{
 			":status":     &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)},
+			":pending":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
+			":running":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusRunning)},
+			":yielded":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusYielded)},
 			":output":     &types.AttributeValueMemberB{Value: output.Value},
 			":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
 		},
 	})
 
 	if err != nil {
+		var conditionFailedErr *types.ConditionalCheckFailedException
+		if errors.As(err, &conditionFailedErr) {
+			return fmt.Errorf("run with ID %s not found or not in a valid state to finish", runID)
+		}
 		return fmt.Errorf("failed to finish run: %w", err)
 	}
 
