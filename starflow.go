@@ -33,13 +33,13 @@ func (e *YieldError) Error() string {
 	return fmt.Sprintf("yield error: %s (run: %s)", e.cid, e.runID)
 }
 
-func NewYieldError(ctx context.Context) (string, error) {
+func NewYieldError(ctx context.Context) (string, string, error) {
 	runID, ok := GetRunID(ctx)
 	if !ok {
-		return "", fmt.Errorf("runID not found in context")
+		return "", "", fmt.Errorf("runID not found in context")
 	}
 	cid := shortuuid.New()
-	return cid, &YieldError{cid: cid, runID: runID}
+	return runID, cid, &YieldError{cid: cid, runID: runID}
 }
 
 // RunStatus represents the status of a workflow run.

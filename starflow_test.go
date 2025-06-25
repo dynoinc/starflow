@@ -451,13 +451,14 @@ func TestWorkflow_YieldError(t *testing.T) {
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	var called int
-	var cid string
+	var runID, cid string
 
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		called++
 		if called == 1 {
 			var err error
-			cid, err = starflow.NewYieldError(ctx)
+			runID, cid, err = starflow.NewYieldError(ctx)
+			require.NoError(t, err)
 			return nil, err
 		}
 		return &testpb.PingResponse{Message: "resumed"}, nil
@@ -487,7 +488,7 @@ def main(ctx, input):
 	outputAny, err := anypb.New(&testpb.PingResponse{Message: "resumed"})
 	require.NoError(t, err)
 
-	err = client.Signal(t.Context(), cid, outputAny)
+	err = client.Signal(t.Context(), runID, cid, outputAny)
 	require.NoError(t, err)
 
 	run, err = client.GetRun(t.Context(), runID)

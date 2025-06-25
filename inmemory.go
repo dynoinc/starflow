@@ -172,14 +172,9 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 }
 
 // Signal resumes a yielded workflow with the given output.
-func (s *InMemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any) error {
+func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	runID, exists := s.yields[cid]
-	if !exists {
-		return fmt.Errorf("signal with ID %s not found", cid)
-	}
 
 	run, exists := s.runs[runID]
 	if !exists {

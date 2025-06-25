@@ -55,6 +55,6 @@ func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*Event, 
 	return c.store.GetEvents(ctx, runID)
 }
 
-func (c *Client[Input]) Signal(ctx context.Context, cid string, output *anypb.Any) error {
-	return c.store.Signal(ctx, cid, output)
+func (c *Client[Input]) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
+	return c.store.Signal(ctx, runID, cid, output)
 }
