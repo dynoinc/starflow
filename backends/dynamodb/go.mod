@@ -90,5 +90,3 @@ require (
 )
 
 replace github.com/dynoinc/starflow => ../../
-
-replace github.com/dynoinc/starflow/backends/inmemory => ../inmemory
