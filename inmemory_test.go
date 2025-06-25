@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/suite"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow"
+	"github.com/dynoinc/starflow/suite"
 )
 
 // MemoryStore is an in-memory implementation of the Store interface.

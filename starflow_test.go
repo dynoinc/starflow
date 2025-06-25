@@ -7,10 +7,11 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/dynoinc/starflow"
-	testpb "github.com/dynoinc/starflow/suite/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow"
+	testpb "github.com/dynoinc/starflow/suite/proto"
 )
 
 func TestWorkflow(t *testing.T) {
@@ -47,16 +48,17 @@ def main(ctx, input):
 
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 3)
-	require.Equal(t, starflow.EventTypeCall, events[0].Type)
-	if callEvent, ok := events[0].AsCallEvent(); ok {
+	require.Len(t, events, 4)
+	require.Equal(t, starflow.EventTypeClaim, events[0].Type)
+	require.Equal(t, starflow.EventTypeCall, events[1].Type)
+	if callEvent, ok := events[1].AsCallEvent(); ok {
 		require.Equal(t, "starflow_test.pingFn", callEvent.FunctionName)
 	}
-	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
-	if returnEvent, ok := events[1].AsReturnEvent(); ok {
+	require.Equal(t, starflow.EventTypeReturn, events[2].Type)
+	if returnEvent, ok := events[2].AsReturnEvent(); ok {
 		require.Empty(t, returnEvent.Error)
 	}
-	require.Equal(t, starflow.EventTypeFinish, events[2].Type)
+	require.Equal(t, starflow.EventTypeFinish, events[3].Type)
 
 	var outputResp testpb.PingResponse
 	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
@@ -123,10 +125,11 @@ def main(ctx, input):
 	require.NoError(t, err)
 	require.NoError(t, err)
 
-	require.Equal(t, 5, len(events))
+	require.Equal(t, 6, len(events))
 
-	expectedFunctions := []string{"starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn", ""}
+	expectedFunctions := []string{"", "starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn", ""}
 	expectedTypes := []starflow.EventType{
+		starflow.EventTypeClaim,
 		starflow.EventTypeCall, starflow.EventTypeReturn,
 		starflow.EventTypeCall, starflow.EventTypeReturn,
 		starflow.EventTypeFinish,
@@ -306,20 +309,20 @@ def main(ctx, input):
 	// Verify events show the failure
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
 
-	// First event should be the function call
-	require.Equal(t, starflow.EventTypeCall, events[0].Type)
-	if callEvent, ok := events[0].AsCallEvent(); ok {
-		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName)
-	}
+	// First event should be the claim
+	require.Equal(t, starflow.EventTypeClaim, events[0].Type)
 
-	// Second event should be the return with error
-	require.Equal(t, starflow.EventTypeReturn, events[1].Type)
+	// Second event should be the function call
+	require.Equal(t, starflow.EventTypeCall, events[1].Type)
 	if callEvent, ok := events[1].AsCallEvent(); ok {
 		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName)
 	}
-	if returnEvent, ok := events[1].AsReturnEvent(); ok {
+
+	// Third event should be the return with error
+	require.Equal(t, starflow.EventTypeReturn, events[2].Type)
+	if returnEvent, ok := events[2].AsReturnEvent(); ok {
 		require.Error(t, returnEvent.Error)
 		require.Contains(t, returnEvent.Error.Error(), "intentional failure: should fail")
 	}
@@ -405,7 +408,7 @@ def main(ctx, input):
 	// Verify events were recorded
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 5) // 2 time.now events + 2 rand.int events + 1 finish event
+	require.Len(t, events, 6) // 1 claim event + 2 time.now events + 2 rand.int events + 1 finish event
 
 	// Check that we have the expected event types
 	timeNowCount := 0
@@ -445,10 +448,12 @@ func TestWorkflow_YieldError(t *testing.T) {
 	var cid string
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		called++
-
-		var err error
-		cid, err = starflow.NewYieldError()
-		return nil, err
+		if called == 1 {
+			var err error
+			cid, err = starflow.NewYieldError()
+			return nil, err
+		}
+		return &testpb.PingResponse{Message: "resumed"}, nil
 	}
 	starflow.Register(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
 
@@ -483,7 +488,7 @@ def main(ctx, input):
 	require.Equal(t, starflow.RunStatusPending, run.Status)
 
 	wf.ProcessOnce(t.Context())
-	require.Equal(t, 1, called)
+	require.Equal(t, 2, called)
 
 	run, err = client.GetRun(t.Context(), runID)
 	require.NoError(t, err)

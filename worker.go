@@ -183,7 +183,7 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			defer cancel()
 
 			// Try to claim the run by recording a ClaimEvent
-			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, ClaimEvent{})
+			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, ClaimEvent{WorkerID: w.workerID})
 			if err != nil {
 				// Another worker claimed it first
 				return

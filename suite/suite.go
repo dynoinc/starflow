@@ -4,10 +4,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/dynoinc/starflow"
-	testpb "github.com/dynoinc/starflow/suite/proto"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow"
+	testpb "github.com/dynoinc/starflow/suite/proto"
 )
 
 // StoreFactory is a function that creates a new store instance for testing
@@ -120,7 +121,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{WorkerID: "test-worker"})
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
@@ -136,11 +137,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		// First claim should succeed
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{WorkerID: "worker1"})
 		require.NoError(t, err)
 
 		// Second claim should fail due to optimistic concurrency
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{})
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.ClaimEvent{WorkerID: "worker2"})
 		require.Error(t, err)
 		require.Equal(t, starflow.ErrConcurrentUpdate, err)
 

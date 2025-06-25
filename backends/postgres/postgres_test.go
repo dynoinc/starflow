@@ -3,10 +3,11 @@ package postgres
 import (
 	"testing"
 
-	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/suite"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/dynoinc/starflow"
+	"github.com/dynoinc/starflow/suite"
 )
 
 func newPostgresStore(t *testing.T) starflow.Store {

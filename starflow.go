@@ -130,7 +130,7 @@ type FinishEvent struct {
 func (f FinishEvent) EventType() EventType { return EventTypeFinish }
 
 type ClaimEvent struct {
-	// No fields needed - just the event type indicates claiming
+	WorkerID string
 }
 
 func (c ClaimEvent) EventType() EventType { return EventTypeClaim }

@@ -10,11 +10,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/dynoinc/starflow"
 	"github.com/lib/pq"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow"
 )
 
 // Store implements the starflow.Store interface using PostgreSQL

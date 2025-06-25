@@ -1,0 +1,41 @@
+# Cursor Rules for Starflow Project
+
+## Development Workflow
+
+Always use the `justfile` for testing and development tasks. The justfile provides standardized commands that work across all Go modules in this project.
+
+### Available Commands
+
+- `just` or `just test` - Run the full test suite (default)
+- `just gen` - Generate code and format imports
+- `just lint` - Run linting and security checks
+- `just test` - Run tests with race detection
+
+### When to Use Justfile
+
+1. **Testing**: Always use `just test` instead of `go test ./...`
+2. **Code Generation**: Use `just gen` for code generation and formatting
+3. **Linting**: Use `just lint` for code quality checks
+4. **Development**: Use `just` as the default command for any development task
+
+### Project Structure
+
+This project contains multiple Go modules:
+- Main module: `github.com/dynoinc/starflow`
+- Backend modules: `backends/dynamodb`, `backends/postgres`
+- Test modules: `suite`, `suite/proto`
+
+The justfile ensures all modules are properly tested and linted.
+
+### Code Style
+
+- Use `goimports` with the local import path `github.com/dynoinc/starflow`
+- Follow Go best practices and use `staticcheck` for additional linting
+- Run security checks with `govulncheck`
+
+### Testing
+
+- Tests include race detection (`-race` flag)
+- All modules are tested with verbose output (`-v` flag)
+- Code is built before testing to catch build errors
+- Module verification is performed before testing 

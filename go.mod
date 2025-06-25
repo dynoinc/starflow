@@ -4,7 +4,6 @@ go 1.24.4
 
 require (
 	github.com/cenkalti/backoff/v4 v4.3.0
-	github.com/dynoinc/starflow/backends/inmemory v0.0.0-00010101000000-000000000000
 	github.com/emcfarlane/starlarkproto v0.0.0-20240320211046-843c31c8d5ed
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/stretchr/testify v1.10.0

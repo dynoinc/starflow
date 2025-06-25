@@ -9,10 +9,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
-	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/suite"
 	"github.com/stretchr/testify/require"
 	dynamodbcontainer "github.com/testcontainers/testcontainers-go/modules/dynamodb"
+
+	"github.com/dynoinc/starflow"
+	"github.com/dynoinc/starflow/suite"
 )
 
 func TestDynamoDBStoreSuite(t *testing.T) {
