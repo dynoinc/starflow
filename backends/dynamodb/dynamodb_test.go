@@ -33,17 +33,14 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 
 	cfg, err := config.LoadDefaultConfig(ctx,
 		config.WithRegion("us-east-1"),
-		config.WithEndpointResolverWithOptions(
-			aws.EndpointResolverWithOptionsFunc(func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-				return aws.Endpoint{URL: endpointURL, SigningRegion: "us-east-1"}, nil
-			}),
-		),
 	)
 	if err != nil {
 		t.Fatalf("failed to load AWS config: %v", err)
 	}
 
-	dynamoClient := dynamodb.NewFromConfig(cfg)
+	dynamoClient := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
+		o.BaseEndpoint = aws.String(endpointURL)
+	})
 
 	// Create tables for scripts and runs
 	scriptsTable := "starflow_scripts"
