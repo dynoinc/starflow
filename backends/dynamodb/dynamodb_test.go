@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/stretchr/testify/require"
@@ -29,10 +29,11 @@ func TestDynamoDBStoreSuite(t *testing.T) {
 	// Add protocol scheme to endpoint
 	endpointURL := "http://" + endpoint
 
-	cfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion("us-east-1"),
-	)
-	require.NoError(t, err)
+	// Use custom config with dummy credentials for local DynamoDB
+	cfg := aws.Config{
+		Region:      "us-east-1",
+		Credentials: credentials.StaticCredentialsProvider{Value: aws.Credentials{AccessKeyID: "fake", SecretAccessKey: "fake"}},
+	}
 
 	dynamoClient := dynamodb.NewFromConfig(cfg, func(o *dynamodb.Options) {
 		o.BaseEndpoint = aws.String(endpointURL)
