@@ -197,63 +197,8 @@ func (s *DynamoDBStore) GetRun(ctx context.Context, runID string) (*starflow.Run
 	return s.itemToRun(result.Item)
 }
 
-// ListRuns retrieves all runs, optionally filtered by status.
-func (s *DynamoDBStore) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
-	var allRuns []*starflow.Run
-
-	if len(statuses) == 0 {
-		// If no status filter, scan the main table
-		input := &dynamodb.ScanInput{
-			TableName: aws.String(s.tableName),
-		}
-
-		result, err := s.client.Scan(ctx, input)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan runs: %w", err)
-		}
-
-		for _, item := range result.Items {
-			run, err := s.itemToRun(item)
-			if err != nil {
-				continue
-			}
-			allRuns = append(allRuns, run)
-		}
-	} else {
-		// Use the status-index GSI for efficient queries
-		for _, status := range statuses {
-			input := &dynamodb.QueryInput{
-				TableName:              aws.String(s.tableName),
-				IndexName:              aws.String("status-index"),
-				KeyConditionExpression: aws.String("#status = :status"),
-				ExpressionAttributeNames: map[string]string{
-					"#status": "status",
-				},
-				ExpressionAttributeValues: map[string]types.AttributeValue{
-					":status": &types.AttributeValueMemberS{Value: string(status)},
-				},
-			}
-
-			result, err := s.client.Query(ctx, input)
-			if err != nil {
-				return nil, fmt.Errorf("failed to query runs by status %s: %w", status, err)
-			}
-
-			for _, item := range result.Items {
-				run, err := s.itemToRun(item)
-				if err != nil {
-					continue
-				}
-				allRuns = append(allRuns, run)
-			}
-		}
-	}
-
-	return allRuns, nil
-}
-
-// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
-func (s *DynamoDBStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+// ClaimableRuns retrieves runs that are either pending or haven't been updated recently.
+func (s *DynamoDBStore) ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
 	var allRuns []*starflow.Run
 
 	// Query for pending runs using the status-index GSI

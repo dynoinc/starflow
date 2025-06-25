@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -216,25 +216,20 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*starflow.Run, error)
 	return &run, nil
 }
 
-// ListRuns returns runs matching the specified statuses
-func (s *Store) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
-	var query string
-	var args []interface{}
+// ClaimableRuns retrieves runs that are either pending or haven't been updated recently.
+func (s *Store) ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+	staleTime := time.Now().Add(-staleThreshold)
 
-	if len(statuses) == 0 {
-		// If no statuses provided, return all runs
-		query = `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
-				  FROM runs ORDER BY created_at DESC`
-	} else {
-		// Filter by specified statuses
-		query = `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
-				  FROM runs WHERE status = ANY($1) ORDER BY created_at DESC`
-		args = append(args, pq.Array(statuses))
-	}
+	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
+			  FROM runs WHERE status = $1 OR (status IN ($2, $3) AND updated_at < $4) ORDER BY created_at DESC`
 
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.db.QueryContext(ctx, query,
+		starflow.RunStatusPending,
+		starflow.RunStatusRunning,
+		starflow.RunStatusYielded,
+		staleTime)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query runs: %w", err)
+		return nil, fmt.Errorf("failed to query runs for claiming: %w", err)
 	}
 	defer rows.Close()
 
@@ -482,68 +477,6 @@ func (s *Store) GetEvents(ctx context.Context, runID string) ([]*starflow.Event,
 	}
 
 	return events, nil
-}
-
-// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
-func (s *Store) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
-	staleTime := time.Now().Add(-staleThreshold)
-
-	query := `SELECT id, script_hash, input, status, next_event_id, output, error_message, created_at, updated_at 
-			  FROM runs WHERE status = $1 OR (status IN ($2, $3) AND updated_at < $4) ORDER BY created_at DESC`
-
-	rows, err := s.db.QueryContext(ctx, query,
-		starflow.RunStatusPending,
-		starflow.RunStatusRunning,
-		starflow.RunStatusYielded,
-		staleTime)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query runs for claiming: %w", err)
-	}
-	defer rows.Close()
-
-	var runs []*starflow.Run
-	for rows.Next() {
-		var run starflow.Run
-		var inputBytes, outputBytes []byte
-		var errorMsg sql.NullString
-
-		err := rows.Scan(
-			&run.ID, &run.ScriptHash, &inputBytes, &run.Status, &run.NextEventID,
-			&outputBytes, &errorMsg, &run.CreatedAt, &run.UpdatedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan run: %w", err)
-		}
-
-		// Convert input bytes to anypb.Any
-		if inputBytes != nil {
-			run.Input = &anypb.Any{}
-			if err := proto.Unmarshal(inputBytes, run.Input); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal input: %w", err)
-			}
-		}
-
-		// Convert output bytes to anypb.Any
-		if outputBytes != nil {
-			run.Output = &anypb.Any{}
-			if err := proto.Unmarshal(outputBytes, run.Output); err != nil {
-				return nil, fmt.Errorf("failed to unmarshal output: %w", err)
-			}
-		}
-
-		// Convert error message
-		if errorMsg.Valid {
-			run.Error = errors.New(errorMsg.String)
-		}
-
-		runs = append(runs, &run)
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating runs: %w", err)
-	}
-
-	return runs, nil
 }
 
 // Helper methods

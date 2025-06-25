@@ -124,29 +124,9 @@ just lint   # Run linting and security checks
 
 ## Architecture
 
-Starflow consists of several key components:
-
-```mermaid
-graph TD
-    subgraph Clients
-        C1["Client 1"]
-        C2["Client 2"]
-    end
-    subgraph Workers
-        W1["Worker 1"]
-        W2["Worker 2"]
-    end
-    S["Store"]
-    C1 -- "create/query" --> S
-    C2 -- "create/query" --> S
-    W1 -- "process" --> S
-    W2 -- "process" --> S
-```
-
-- **Store**: Central component that persists workflow state and events
-- **Client**: Used to create and query workflow runs
-- **Worker**: Processes workflow runs and executes functions
-- **Event System**: Records all workflow activities for replay
+Starflow primarily revolves around **Store**. **Clients** directly interact with store
+to create/query runs. One or more **Worker** in the background pick up workflow runs ready
+to run and execute the logic. 
 
 ## Backends
 

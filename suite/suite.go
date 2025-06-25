@@ -219,31 +219,6 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NotNil(t, run.Output)
 	})
 
-	t.Run("ListRuns", func(t *testing.T) {
-		// Create multiple runs
-		_, err := s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-		_, err = s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-		_, err = s.CreateRun(ctx, sh, nil)
-		require.NoError(t, err)
-
-		// Test listing all runs
-		runs, err := s.ListRuns(ctx)
-		require.NoError(t, err)
-		require.Greater(t, len(runs), 3)
-
-		// Test listing by specific status (all should be PENDING by default)
-		pendingRuns, err := s.ListRuns(ctx, starflow.RunStatusPending)
-		require.NoError(t, err)
-		require.Greater(t, len(pendingRuns), 3)
-
-		// Test listing by multiple statuses
-		activeRuns, err := s.ListRuns(ctx, starflow.RunStatusPending, starflow.RunStatusRunning)
-		require.NoError(t, err)
-		require.Greater(t, len(activeRuns), 3)
-	})
-
 	t.Run("GetEvents", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)

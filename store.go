@@ -26,8 +26,7 @@ type Store interface {
 	// - Creating a run with a non-existent script hash fails.
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
-	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
-	ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*Run, error)
+	ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*Run, error)
 
 	// Signals - Methods to signal a run.
 	//

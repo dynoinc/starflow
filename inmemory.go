@@ -97,29 +97,8 @@ func (s *InMemoryStore) GetRun(ctx context.Context, runID string) (*Run, error) 
 	return &runCopy, nil
 }
 
-// ListRuns returns all runs whose status matches any of the supplied states.
-func (s *InMemoryStore) ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var result []*Run
-	statusSet := make(map[RunStatus]bool)
-	for _, status := range statuses {
-		statusSet[status] = true
-	}
-
-	for _, run := range s.runs {
-		if len(statuses) == 0 || statusSet[run.Status] {
-			runCopy := *run
-			result = append(result, &runCopy)
-		}
-	}
-
-	return result, nil
-}
-
-// ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
-func (s *InMemoryStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*Run, error) {
+// ClaimableRuns retrieves runs that are either pending or haven't been updated recently.
+func (s *InMemoryStore) ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

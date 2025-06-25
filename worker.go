@@ -164,7 +164,7 @@ func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDe
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	runs, err := w.store.ListRunsForClaiming(ctx, 30*time.Second)
+	runs, err := w.store.ClaimableRuns(ctx, 30*time.Second)
 	if err != nil {
 		return
 	}
