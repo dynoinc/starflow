@@ -1,4 +1,4 @@
-package starflow_test
+package starflow
 
 import (
 	"context"
@@ -6,37 +6,33 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
-
-	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/suite"
 )
 
-// MemoryStore is an in-memory implementation of the Store interface.
-type MemoryStore struct {
+// InMemoryStore is an in-memory implementation of the Store interface.
+type InMemoryStore struct {
 	mu      sync.RWMutex
 	scripts map[string][]byte
-	runs    map[string]*starflow.Run
-	events  map[string][]*starflow.Event
+	runs    map[string]*Run
+	events  map[string][]*Event
 	yields  map[string]string
 }
 
-// New creates a new MemoryStore.
-func NewInMemoryStore() *MemoryStore {
-	return &MemoryStore{
+// NewInMemoryStore creates a new InMemoryStore.
+func NewInMemoryStore() *InMemoryStore {
+	return &InMemoryStore{
 		scripts: make(map[string][]byte),
-		runs:    make(map[string]*starflow.Run),
-		events:  make(map[string][]*starflow.Event),
+		runs:    make(map[string]*Run),
+		events:  make(map[string][]*Event),
 		yields:  make(map[string]string),
 	}
 }
 
 // SaveScript persists the Starlark script content.
-func (s *MemoryStore) SaveScript(ctx context.Context, content []byte) (string, error) {
+func (s *InMemoryStore) SaveScript(ctx context.Context, content []byte) (string, error) {
 	hash := sha256.Sum256(content)
 	hashStr := hex.EncodeToString(hash[:])
 
@@ -48,7 +44,7 @@ func (s *MemoryStore) SaveScript(ctx context.Context, content []byte) (string, e
 }
 
 // GetScript retrieves a script by its sha256 hash.
-func (s *MemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byte, error) {
+func (s *InMemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -60,14 +56,14 @@ func (s *MemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byte,
 }
 
 // CreateRun creates a new run record for a given script.
-func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
+func (s *InMemoryStore) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
 	runID := shortuuid.New()
 	now := time.Now()
 
-	run := &starflow.Run{
+	run := &Run{
 		ID:          runID,
 		ScriptHash:  scriptHash,
-		Status:      starflow.RunStatusPending,
+		Status:      RunStatusPending,
 		Input:       input,
 		NextEventID: 0,
 		CreatedAt:   now,
@@ -82,12 +78,12 @@ func (s *MemoryStore) CreateRun(ctx context.Context, scriptHash string, input *a
 	}
 
 	s.runs[runID] = run
-	s.events[runID] = make([]*starflow.Event, 0)
+	s.events[runID] = make([]*Event, 0)
 	return runID, nil
 }
 
 // GetRun retrieves the details of a specific run.
-func (s *MemoryStore) GetRun(ctx context.Context, runID string) (*starflow.Run, error) {
+func (s *InMemoryStore) GetRun(ctx context.Context, runID string) (*Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -102,12 +98,12 @@ func (s *MemoryStore) GetRun(ctx context.Context, runID string) (*starflow.Run, 
 }
 
 // ListRuns returns all runs whose status matches any of the supplied states.
-func (s *MemoryStore) ListRuns(ctx context.Context, statuses ...starflow.RunStatus) ([]*starflow.Run, error) {
+func (s *InMemoryStore) ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var result []*starflow.Run
-	statusSet := make(map[starflow.RunStatus]bool)
+	var result []*Run
+	statusSet := make(map[RunStatus]bool)
 	for _, status := range statuses {
 		statusSet[status] = true
 	}
@@ -123,17 +119,17 @@ func (s *MemoryStore) ListRuns(ctx context.Context, statuses ...starflow.RunStat
 }
 
 // ListRunsForClaiming retrieves runs that are either pending or haven't been updated recently.
-func (s *MemoryStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*starflow.Run, error) {
+func (s *InMemoryStore) ListRunsForClaiming(ctx context.Context, staleThreshold time.Duration) ([]*Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var runs []*starflow.Run
+	var runs []*Run
 	staleTime := time.Now().Add(-staleThreshold)
 
 	for _, run := range s.runs {
-		if run.Status == starflow.RunStatusPending ||
-			(run.Status == starflow.RunStatusRunning && run.UpdatedAt.Before(staleTime)) ||
-			(run.Status == starflow.RunStatusYielded && run.UpdatedAt.Before(staleTime)) {
+		if run.Status == RunStatusPending ||
+			(run.Status == RunStatusRunning && run.UpdatedAt.Before(staleTime)) ||
+			(run.Status == RunStatusYielded && run.UpdatedAt.Before(staleTime)) {
 			// Create a copy to avoid external modifications
 			runCopy := *run
 			runs = append(runs, &runCopy)
@@ -145,7 +141,7 @@ func (s *MemoryStore) ListRunsForClaiming(ctx context.Context, staleThreshold ti
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 // On success the store increments NextEventID by one.
-func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata starflow.EventMetadata) (int64, error) {
+func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata EventMetadata) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -156,11 +152,11 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 
 	// Check optimistic concurrency precondition
 	if storedRun.NextEventID != nextEventID {
-		return 0, starflow.ErrConcurrentUpdate
+		return 0, ErrConcurrentUpdate
 	}
 
 	// Add event to the list
-	event := &starflow.Event{
+	event := &Event{
 		Timestamp: time.Now(),
 		Type:      eventMetadata.EventType(),
 		Metadata:  eventMetadata,
@@ -170,23 +166,23 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 
 	// Update the runs
 	switch event.Type {
-	case starflow.EventTypeReturn:
-		if returnEvent, ok := event.Metadata.(starflow.ReturnEvent); ok && returnEvent.Error != nil {
-			storedRun.Status = starflow.RunStatusFailed
+	case EventTypeReturn:
+		if returnEvent, ok := event.Metadata.(ReturnEvent); ok && returnEvent.Error != nil {
+			storedRun.Status = RunStatusFailed
 			storedRun.Error = returnEvent.Error
 		}
-	case starflow.EventTypeYield:
-		if yieldEvent, ok := event.Metadata.(starflow.YieldEvent); ok {
-			storedRun.Status = starflow.RunStatusYielded
+	case EventTypeYield:
+		if yieldEvent, ok := event.Metadata.(YieldEvent); ok {
+			storedRun.Status = RunStatusYielded
 			s.yields[yieldEvent.SignalID] = runID
 		}
-	case starflow.EventTypeFinish:
-		if finishEvent, ok := event.Metadata.(starflow.FinishEvent); ok {
-			storedRun.Status = starflow.RunStatusCompleted
+	case EventTypeFinish:
+		if finishEvent, ok := event.Metadata.(FinishEvent); ok {
+			storedRun.Status = RunStatusCompleted
 			storedRun.Output = finishEvent.Output
 		}
-	case starflow.EventTypeClaim:
-		storedRun.Status = starflow.RunStatusRunning
+	case EventTypeClaim:
+		storedRun.Status = RunStatusRunning
 	}
 
 	storedRun.NextEventID++
@@ -194,7 +190,8 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 	return storedRun.NextEventID, nil
 }
 
-func (s *MemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any) error {
+// Signal resumes a yielded workflow with the given output.
+func (s *InMemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -208,13 +205,13 @@ func (s *MemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any)
 		return fmt.Errorf("run with ID %s not found", runID)
 	}
 
-	s.events[runID] = append(s.events[runID], &starflow.Event{
-		Type:     starflow.EventTypeResume,
-		Metadata: starflow.ResumeEvent{SignalID: cid, Output: output},
+	s.events[runID] = append(s.events[runID], &Event{
+		Type:     EventTypeResume,
+		Metadata: ResumeEvent{SignalID: cid, Output: output},
 	})
 
 	run.NextEventID++
-	run.Status = starflow.RunStatusPending
+	run.Status = RunStatusPending
 	run.UpdatedAt = time.Now()
 
 	delete(s.yields, cid)
@@ -222,7 +219,7 @@ func (s *MemoryStore) Signal(ctx context.Context, cid string, output *anypb.Any)
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
-func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.Event, error) {
+func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -232,13 +229,7 @@ func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.
 	}
 
 	// Return a copy to avoid external modifications
-	result := make([]*starflow.Event, len(events))
+	result := make([]*Event, len(events))
 	copy(result, events)
 	return result, nil
-}
-
-func TestInMemoryStore(t *testing.T) {
-	suite.RunStoreSuite(t, func(t *testing.T) starflow.Store {
-		return NewInMemoryStore()
-	})
 }

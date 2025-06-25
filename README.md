@@ -4,13 +4,13 @@ A workflow engine for Go that enables deterministic, resumable, and distributed 
 
 ## Features
 
-- **Deterministic Execution**: Workflows are deterministic and can be replayed from any point
-- **Resumable Workflows**: Support for yielding and resuming long-running workflows
-- **Starlark Scripting**: Write workflows in Starlark (Python-like syntax)
-- **Multiple Backends**: Support for in-memory, DynamoDB, and PostgreSQL storage
-- **Protobuf Integration**: Native support for Protocol Buffers
-- **Retry Policies**: Configurable retry policies with exponential backoff
-- **Event History**: Complete audit trail of workflow execution
+### Deterministic & Durable Workflows
+Write workflows in Starlark (Python-like syntax) that are deterministic and can be replayed from any point with full durability guarantees. 
+Every execution step is recorded and can be resumed exactly where it left off.
+
+### Pluggable Backends
+Support for in-memory, DynamoDB, and PostgreSQL storage with easy extensibility for custom backends. 
+Choose the storage solution that fits your deployment environment and scale requirements.
 
 ## Installation
 
@@ -28,7 +28,7 @@ import (
     "time"
     
     "github.com/dynoinc/starflow"
-    "github.com/dynoinc/starflow/suite/proto"
+    "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func main() {
@@ -36,28 +36,34 @@ func main() {
     store := starflow.NewInMemoryStore()
     
     // Create a worker
-    worker := starflow.NewWorker[*proto.PingRequest, *proto.PingResponse](store, 10*time.Millisecond)
+    worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store, 10*time.Millisecond)
     
     // Register your functions
-    pingFn := func(ctx context.Context, req *proto.PingRequest) (*proto.PingResponse, error) {
-        return &proto.PingResponse{Message: "pong: " + req.Message}, nil
+    echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
+        return &wrapperspb.StringValue{Value: "echo: " + req.Value}, nil
     }
-    starflow.Register(worker, pingFn, starflow.WithName("pingFn"))
+    starflow.Register(worker, echoFn, starflow.WithName("echoFn"))
     
     // Create a client
-    client := starflow.NewClient[*proto.PingRequest](store)
+    client := starflow.NewClient[*wrapperspb.StringValue](store)
     
     // Define your workflow script
     script := `
 load("proto", "proto")
 
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return pingFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    # Use well-known protobuf types
+    stringvalue_proto = proto.file("google/protobuf/wrappers.proto")
+    
+    # Call our registered function
+    result = echoFn(ctx=ctx, req=stringvalue_proto.StringValue(value=input.value))
+    
+    # Return the result
+    return result
 `
     
     // Run the workflow
-    runID, err := client.Run(context.Background(), []byte(script), &proto.PingRequest{Message: "hello"})
+    runID, err := client.Run(context.Background(), []byte(script), &wrapperspb.StringValue{Value: "hello"})
     if err != nil {
         panic(err)
     }
@@ -71,9 +77,9 @@ def main(ctx, input):
         panic(err)
     }
     
-    var output proto.PingResponse
+    var output wrapperspb.StringValue
     run.Output.UnmarshalTo(&output)
-    println("Result:", output.Message)
+    println("Result:", output.Value)
 }
 ```
 
@@ -120,9 +126,26 @@ just lint   # Run linting and security checks
 
 Starflow consists of several key components:
 
+```mermaid
+graph TD
+    subgraph Clients
+        C1["Client 1"]
+        C2["Client 2"]
+    end
+    subgraph Workers
+        W1["Worker 1"]
+        W2["Worker 2"]
+    end
+    S["Store"]
+    C1 -- "create/query" --> S
+    C2 -- "create/query" --> S
+    W1 -- "process" --> S
+    W2 -- "process" --> S
+```
+
+- **Store**: Central component that persists workflow state and events
+- **Client**: Used to create and query workflow runs
 - **Worker**: Processes workflow runs and executes functions
-- **Store**: Persists workflow state and events
-- **Client**: Manages workflow lifecycle
 - **Event System**: Records all workflow activities for replay
 
 ## Backends
