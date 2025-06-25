@@ -23,7 +23,7 @@ import (
 	"github.com/dynoinc/starflow/events"
 )
 
-// Thread executes a single workflow run.
+// thread executes a single workflow run.
 type thread[Input proto.Message, Output proto.Message] struct {
 	w      *Worker[Input, Output]
 	run    *Run
@@ -45,13 +45,13 @@ func popEvent[ET events.EventMetadata, Input proto.Message, Output proto.Message
 	return nextEvent.Metadata.(ET), nil, true
 }
 
-func recordEvent[ET events.EventMetadata, Input proto.Message, Output proto.Message](ctx context.Context, t *thread[Input, Output], event ET) error {
-	nextEventID, err := t.w.store.RecordEvent(ctx, t.run.ID, t.run.NextEventID, event)
+func recordEvent[ET events.EventMetadata](ctx context.Context, store Store, run *Run, event ET) error {
+	nextEventID, err := store.RecordEvent(ctx, run.ID, run.NextEventID, event)
 	if err != nil {
 		return fmt.Errorf("failed to record event: %w", err)
 	}
 
-	t.run.NextEventID = nextEventID
+	run.NextEventID = nextEventID
 	return nil
 }
 
@@ -163,7 +163,7 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 		case <-time.After(sleepDuration):
 		}
 
-		if err := recordEvent(starlarkCtx.ctx, t, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
+		if err := recordEvent(starlarkCtx.ctx, t.w.store, t.run, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
 			return nil, err
 		}
 
@@ -192,7 +192,7 @@ func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
 			timestamp = timeNowEvent.Timestamp()
 		}
 
-		if err := recordEvent(starlarkCtx.ctx, t, events.NewTimeNowEvent(timestamp)); err != nil {
+		if err := recordEvent(starlarkCtx.ctx, t.w.store, t.run, events.NewTimeNowEvent(timestamp)); err != nil {
 			return nil, err
 		}
 
@@ -235,7 +235,7 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 		} else {
 			// record a rand_int event
 			result = rand.Int63n(maxInt64)
-			if err := recordEvent(starlarkCtx.ctx, t, events.NewRandIntEvent(result)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t.w.store, t.run, events.NewRandIntEvent(result)); err != nil {
 				return nil, err
 			}
 		}
@@ -261,7 +261,13 @@ func runThread[Input proto.Message, Output proto.Message](
 	if err != nil {
 		return zero, fmt.Errorf("failed to get events: %w", err)
 	}
-	t.events = eventList
+	for _, event := range eventList {
+		if event.Type() == events.EventTypeClaim {
+			continue
+		}
+
+		t.events = append(t.events, event)
+	}
 
 	// Unmarshal the input from anypb.Any
 	var input Input
@@ -348,7 +354,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := recordEvent(ctx, t, events.NewFinishEvent(outputAny)); err != nil {
+	if err := recordEvent(ctx, t.w.store, t.run, events.NewFinishEvent(outputAny)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
@@ -413,7 +419,7 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 				return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
 			}
 
-			if err := recordEvent(starlarkCtx.ctx, t, events.NewCallEvent(regFn.name, inputAny)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t.w.store, t.run, events.NewCallEvent(regFn.name, inputAny)); err != nil {
 				return starlark.None, err
 			}
 		}
@@ -509,7 +515,7 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			event = events.NewReturnEvent(outputAny, nil)
 		}
 
-		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {
+		if err := recordEvent(starlarkCtx.ctx, t.w.store, t.run, event); err != nil {
 			return starlark.None, err
 		}
 

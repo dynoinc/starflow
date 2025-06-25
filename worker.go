@@ -189,21 +189,12 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
-			// Try to claim the run by recording a ClaimEvent
-			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, events.NewClaimEvent(w.workerID))
-			if err != nil {
-				// Another worker claimed it first
+			if err := recordEvent(ctx, w.store, run, events.NewClaimEvent(w.workerID)); err != nil {
+				slog.Error("failed to claim run", "run_id", run.ID, "error", err)
 				return
 			}
 
-			// Get the updated run with the new NextEventID
-			updatedRun, err := w.store.GetRun(ctx, run.ID)
-			if err != nil {
-				slog.Error("failed to get updated run", "run_id", run.ID, "error", err)
-				return
-			}
-
-			if _, err := runThread(ctx, w, updatedRun); err != nil {
+			if _, err := runThread(ctx, w, run); err != nil {
 				slog.Error("failed to resume run", "run_id", run.ID, "error", err)
 			}
 		}(r)

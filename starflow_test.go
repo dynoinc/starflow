@@ -455,12 +455,10 @@ func TestWorkflow_YieldError(t *testing.T) {
 
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		called++
-		if called == 1 {
-			var err error
-			runID, cid, err = starflow.NewYieldError(ctx)
-			return nil, err
-		}
-		return &testpb.PingResponse{Message: "resumed"}, nil
+
+		var err error
+		runID, cid, err = starflow.NewYieldError(ctx)
+		return nil, err
 	}
 	starflow.Register(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
 
@@ -495,7 +493,7 @@ def main(ctx, input):
 	require.Equal(t, starflow.RunStatusPending, run.Status)
 
 	wf.ProcessOnce(t.Context())
-	require.Equal(t, 2, called)
+	require.Equal(t, 1, called)
 
 	run, err = client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
