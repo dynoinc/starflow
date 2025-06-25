@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow/events"
 )
 
 // Client provides an interface for creating and managing workflow runs.
@@ -59,7 +61,7 @@ func (c *Client[Input]) GetRun(ctx context.Context, runID string) (*Run, error) 
 
 // GetEvents retrieves the execution history of a workflow run.
 // Returns a chronological list of events that occurred during execution.
-func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
+func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*events.Event, error) {
 	return c.store.GetEvents(ctx, runID)
 }
 

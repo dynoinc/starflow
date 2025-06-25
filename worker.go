@@ -18,6 +18,8 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
+	"github.com/dynoinc/starflow/events"
+
 	_ "google.golang.org/protobuf/types/known/anypb"
 	_ "google.golang.org/protobuf/types/known/durationpb"
 	_ "google.golang.org/protobuf/types/known/emptypb"
@@ -188,7 +190,7 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 			defer cancel()
 
 			// Try to claim the run by recording a ClaimEvent
-			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, NewClaimEvent(w.workerID))
+			_, err := w.store.RecordEvent(ctx, run.ID, run.NextEventID, events.NewClaimEvent(w.workerID))
 			if err != nil {
 				// Another worker claimed it first
 				return

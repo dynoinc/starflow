@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow/events"
 )
 
 // ErrConcurrentUpdate indicates optimistic concurrency failure.
@@ -48,6 +50,6 @@ type Store interface {
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
 	// - If event is a claim event, run will be updated to be in status RunStatusRunning.
-	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata EventMetadata) (int64, error)
-	GetEvents(ctx context.Context, runID string) ([]*Event, error)
+	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error)
+	GetEvents(ctx context.Context, runID string) ([]*events.Event, error)
 }

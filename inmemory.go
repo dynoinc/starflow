@@ -10,6 +10,8 @@ import (
 
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
+
+	"github.com/dynoinc/starflow/events"
 )
 
 // InMemoryStore is an in-memory implementation of the Store interface.
@@ -22,7 +24,7 @@ type InMemoryStore struct {
 	mu      sync.RWMutex
 	scripts map[string][]byte
 	runs    map[string]*Run
-	events  map[string][]*Event
+	events  map[string][]*events.Event
 	yields  map[string]string
 }
 
@@ -33,7 +35,7 @@ func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		scripts: make(map[string][]byte),
 		runs:    make(map[string]*Run),
-		events:  make(map[string][]*Event),
+		events:  make(map[string][]*events.Event),
 		yields:  make(map[string]string),
 	}
 }
@@ -85,7 +87,7 @@ func (s *InMemoryStore) CreateRun(ctx context.Context, scriptHash string, input 
 	}
 
 	s.runs[runID] = run
-	s.events[runID] = make([]*Event, 0)
+	s.events[runID] = make([]*events.Event, 0)
 	return runID, nil
 }
 
@@ -127,7 +129,7 @@ func (s *InMemoryStore) ClaimableRuns(ctx context.Context, staleThreshold time.D
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
 // On success the store increments NextEventID by one.
-func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata EventMetadata) (int64, error) {
+func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -142,7 +144,7 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	}
 
 	// Add event to the list
-	event := &Event{
+	event := &events.Event{
 		Timestamp: time.Now(),
 		Metadata:  eventMetadata,
 	}
@@ -151,25 +153,25 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 
 	// Update the runs
 	switch event.Type() {
-	case EventTypeReturn:
-		if returnEvent, ok := event.Metadata.(ReturnEvent); ok {
+	case events.EventTypeReturn:
+		if returnEvent, ok := event.Metadata.(events.ReturnEvent); ok {
 			_, err := returnEvent.Output()
 			if err != nil {
 				storedRun.Status = RunStatusFailed
 				storedRun.Error = err
 			}
 		}
-	case EventTypeYield:
-		if yieldEvent, ok := event.Metadata.(YieldEvent); ok {
+	case events.EventTypeYield:
+		if yieldEvent, ok := event.Metadata.(events.YieldEvent); ok {
 			storedRun.Status = RunStatusYielded
 			s.yields[yieldEvent.SignalID()] = runID
 		}
-	case EventTypeFinish:
-		if finishEvent, ok := event.Metadata.(FinishEvent); ok {
+	case events.EventTypeFinish:
+		if finishEvent, ok := event.Metadata.(events.FinishEvent); ok {
 			storedRun.Status = RunStatusCompleted
 			storedRun.Output = finishEvent.Output()
 		}
-	case EventTypeClaim:
+	case events.EventTypeClaim:
 		storedRun.Status = RunStatusRunning
 	}
 
@@ -198,8 +200,8 @@ func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *a
 	}
 
 	// Valid signal - add resume event and update run
-	s.events[runID] = append(s.events[runID], &Event{
-		Metadata: NewResumeEvent(cid, output),
+	s.events[runID] = append(s.events[runID], &events.Event{
+		Metadata: events.NewResumeEvent(cid, output),
 	})
 
 	run.NextEventID++
@@ -211,17 +213,17 @@ func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *a
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
-func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
+func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*events.Event, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	events, exists := s.events[runID]
+	runEvents, exists := s.events[runID]
 	if !exists {
 		return nil, fmt.Errorf("run with ID %s not found", runID)
 	}
 
 	// Return a copy to avoid external modifications
-	result := make([]*Event, len(events))
-	copy(result, events)
+	result := make([]*events.Event, len(runEvents))
+	copy(result, runEvents)
 	return result, nil
 }

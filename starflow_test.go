@@ -11,6 +11,7 @@ import (
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/dynoinc/starflow"
+	"github.com/dynoinc/starflow/events"
 	"github.com/dynoinc/starflow/suite"
 	testpb "github.com/dynoinc/starflow/suite/proto"
 )
@@ -50,20 +51,20 @@ def main(ctx, input):
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
-	events, err := client.GetEvents(t.Context(), runID)
+	runEvents, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 4)
-	require.Equal(t, starflow.EventTypeClaim, events[0].Type())
-	require.Equal(t, starflow.EventTypeCall, events[1].Type())
-	if callEvent, ok := events[1].Metadata.(starflow.CallEvent); ok {
+	require.Len(t, runEvents, 4)
+	require.Equal(t, events.EventTypeClaim, runEvents[0].Type())
+	require.Equal(t, events.EventTypeCall, runEvents[1].Type())
+	if callEvent, ok := runEvents[1].Metadata.(events.CallEvent); ok {
 		require.Equal(t, "starflow_test.pingFn", callEvent.FunctionName())
 	}
-	require.Equal(t, starflow.EventTypeReturn, events[2].Type())
-	if returnEvent, ok := events[2].Metadata.(starflow.ReturnEvent); ok {
+	require.Equal(t, events.EventTypeReturn, runEvents[2].Type())
+	if returnEvent, ok := runEvents[2].Metadata.(events.ReturnEvent); ok {
 		_, err := returnEvent.Output()
 		require.Empty(t, err)
 	}
-	require.Equal(t, starflow.EventTypeFinish, events[3].Type())
+	require.Equal(t, events.EventTypeFinish, runEvents[3].Type())
 
 	var outputResp testpb.PingResponse
 	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
@@ -126,24 +127,23 @@ def main(ctx, input):
 
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
-	events, err := client.GetEvents(t.Context(), runID)
-	require.NoError(t, err)
+	runEvents, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
 
-	require.Equal(t, 6, len(events))
+	require.Equal(t, 6, len(runEvents))
 
 	expectedFunctions := []string{"", "starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn", ""}
-	expectedTypes := []starflow.EventType{
-		starflow.EventTypeClaim,
-		starflow.EventTypeCall, starflow.EventTypeReturn,
-		starflow.EventTypeCall, starflow.EventTypeReturn,
-		starflow.EventTypeFinish,
+	expectedTypes := []events.EventType{
+		events.EventTypeClaim,
+		events.EventTypeCall, events.EventTypeReturn,
+		events.EventTypeCall, events.EventTypeReturn,
+		events.EventTypeFinish,
 	}
 
-	for i, event := range events {
+	for i, event := range runEvents {
 		require.Equal(t, expectedTypes[i], event.Type(), "event %d type mismatch", i)
 		expectedFunc := expectedFunctions[i]
-		if callEvent, ok := event.Metadata.(starflow.CallEvent); ok {
+		if callEvent, ok := event.Metadata.(events.CallEvent); ok {
 			require.Equal(t, expectedFunc, callEvent.FunctionName(), "event %d function name mismatch", i)
 		}
 	}
@@ -151,7 +151,7 @@ def main(ctx, input):
 	t.Log("✅ Workflow completed successfully!")
 	t.Logf("Run ID: %s", runID)
 	t.Logf("Output: %s", outputResp.Message)
-	t.Logf("Events recorded: %d", len(events))
+	t.Logf("Events recorded: %d", len(runEvents))
 }
 
 func TestWorkflow_StarlarkMathImport(t *testing.T) {
@@ -312,22 +312,22 @@ def main(ctx, input):
 	require.Contains(t, run.Error.Error(), "intentional failure: should fail")
 
 	// Verify events show the failure
-	events, err := client.GetEvents(t.Context(), runID)
+	runEvents, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 3)
+	require.Len(t, runEvents, 3)
 
 	// First event should be the claim
-	require.Equal(t, starflow.EventTypeClaim, events[0].Type())
+	require.Equal(t, events.EventTypeClaim, runEvents[0].Type())
 
 	// Second event should be the function call
-	require.Equal(t, starflow.EventTypeCall, events[1].Type())
-	if callEvent, ok := events[1].Metadata.(starflow.CallEvent); ok {
+	require.Equal(t, events.EventTypeCall, runEvents[1].Type())
+	if callEvent, ok := runEvents[1].Metadata.(events.CallEvent); ok {
 		require.Equal(t, "starflow_test.failingFn", callEvent.FunctionName())
 	}
 
 	// Third event should be the return with error
-	require.Equal(t, starflow.EventTypeReturn, events[2].Type())
-	if returnEvent, ok := events[2].Metadata.(starflow.ReturnEvent); ok {
+	require.Equal(t, events.EventTypeReturn, runEvents[2].Type())
+	if returnEvent, ok := runEvents[2].Metadata.(events.ReturnEvent); ok {
 		_, err := returnEvent.Output()
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "intentional failure: should fail")
@@ -412,18 +412,18 @@ def main(ctx, input):
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	// Verify events were recorded
-	events, err := client.GetEvents(t.Context(), runID)
+	runEvents, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 6) // 1 claim event + 2 time.now events + 2 rand.int events + 1 finish event
+	require.Len(t, runEvents, 6) // 1 claim event + 2 time.now events + 2 rand.int events + 1 finish event
 
 	// Check that we have the expected event types
 	timeNowCount := 0
 	randIntCount := 0
-	for _, event := range events {
+	for _, event := range runEvents {
 		switch event.Type() {
-		case starflow.EventTypeTimeNow:
+		case events.EventTypeTimeNow:
 			timeNowCount++
-		case starflow.EventTypeRandInt:
+		case events.EventTypeRandInt:
 			randIntCount++
 		}
 	}
@@ -441,7 +441,7 @@ def main(ctx, input):
 	t.Log("✅ Deterministic functions test completed successfully!")
 	t.Logf("Run ID: %s", runID)
 	t.Logf("Output: %s", outputResp.Message)
-	t.Logf("Events recorded: %d", len(events))
+	t.Logf("Events recorded: %d", len(runEvents))
 }
 
 func TestWorkflow_YieldError(t *testing.T) {
