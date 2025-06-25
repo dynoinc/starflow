@@ -361,8 +361,8 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := t.w.store.FinishRun(ctx, t.run.ID, outputAny); err != nil {
-		return zero, fmt.Errorf("failed to update run output: %w", err)
+	if err := recordEvent(ctx, t, FinishEvent{Output: outputAny}); err != nil {
+		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
 	return output, nil

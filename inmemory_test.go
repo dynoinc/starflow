@@ -182,6 +182,11 @@ func (s *MemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID
 			storedRun.Status = starflow.RunStatusYielded
 			s.yields[yieldEvent.SignalID] = runID
 		}
+	case starflow.EventTypeFinish:
+		if finishEvent, ok := event.AsFinishEvent(); ok {
+			storedRun.Status = starflow.RunStatusCompleted
+			storedRun.Output = finishEvent.Output
+		}
 	}
 
 	storedRun.NextEventID++
@@ -232,22 +237,6 @@ func (s *MemoryStore) GetEvents(ctx context.Context, runID string) ([]*starflow.
 	result := make([]*starflow.Event, len(events))
 	copy(result, events)
 	return result, nil
-}
-
-// FinishRun updates the output of a run and typically sets status to COMPLETED.
-func (s *MemoryStore) FinishRun(ctx context.Context, runID string, output *anypb.Any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	run, exists := s.runs[runID]
-	if !exists {
-		return fmt.Errorf("run with ID %s not found", runID)
-	}
-
-	run.Output = output
-	run.Status = starflow.RunStatusCompleted
-	run.UpdatedAt = time.Now()
-	return nil
 }
 
 func TestInMemoryStore(t *testing.T) {

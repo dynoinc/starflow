@@ -209,15 +209,18 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Error(t, err, "signaling twice with same signal ID should fail")
 	})
 
-	t.Run("FinishRun", func(t *testing.T) {
+	t.Run("FinishEventUpdatesRunToCompleted", func(t *testing.T) {
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
-		err = s.FinishRun(ctx, id, output)
+		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		run, err := s.GetRun(ctx, id)
+		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, starflow.FinishEvent{Output: output})
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, starflow.RunStatusCompleted, run.Status)
 		require.NotNil(t, run.Output)

@@ -28,7 +28,6 @@ type Store interface {
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimRun(ctx context.Context, runID string, workerID string, leaseUntil time.Time) (bool, error)
-	FinishRun(ctx context.Context, runID string, output *anypb.Any) error
 	ListRuns(ctx context.Context, statuses ...RunStatus) ([]*Run, error)
 
 	// Signals - Methods to signal a run.
@@ -45,6 +44,7 @@ type Store interface {
 	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID.
 	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
+	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
 	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata EventMetadata) (int64, error)
 	GetEvents(ctx context.Context, runID string) ([]*Event, error)
 }

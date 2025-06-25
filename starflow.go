@@ -70,6 +70,7 @@ const (
 	EventTypeRandInt EventType = "RAND_INT"
 	EventTypeYield   EventType = "YIELD"
 	EventTypeResume  EventType = "RESUME"
+	EventTypeFinish  EventType = "FINISH"
 )
 
 // EventMetadata interface for different event types
@@ -125,6 +126,12 @@ type ResumeEvent struct {
 
 func (r ResumeEvent) EventType() EventType { return EventTypeResume }
 
+type FinishEvent struct {
+	Output *anypb.Any
+}
+
+func (f FinishEvent) EventType() EventType { return EventTypeFinish }
+
 // Event represents a single event in the execution history of a run.
 type Event struct {
 	Timestamp time.Time
@@ -166,4 +173,9 @@ func (e Event) AsYieldEvent() (YieldEvent, bool) {
 func (e Event) AsResumeEvent() (ResumeEvent, bool) {
 	resumeEvent, ok := e.Metadata.(ResumeEvent)
 	return resumeEvent, ok
+}
+
+func (e Event) AsFinishEvent() (FinishEvent, bool) {
+	finishEvent, ok := e.Metadata.(FinishEvent)
+	return finishEvent, ok
 }

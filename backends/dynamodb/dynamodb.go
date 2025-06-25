@@ -330,6 +330,14 @@ func (s *DynamoDBStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		updateExpression += ", #status = :status"
 		expressionAttributeNames["#status"] = "status"
 		expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusYielded)}
+	case starflow.EventTypeFinish:
+		if finishEvent, ok := eventMetadata.(starflow.FinishEvent); ok {
+			updateExpression += ", #status = :status, #output = :output"
+			expressionAttributeNames["#status"] = "status"
+			expressionAttributeNames["#output"] = "output"
+			expressionAttributeValues[":status"] = &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)}
+			expressionAttributeValues[":output"] = &types.AttributeValueMemberB{Value: finishEvent.Output.Value}
+		}
 	}
 
 	// Add the condition check
@@ -587,47 +595,13 @@ func (s *DynamoDBStore) deserializeEventMetadata(eventType starflow.EventType, m
 		var event starflow.ResumeEvent
 		err := json.Unmarshal(metadataBytes, &event)
 		return event, err
+	case starflow.EventTypeFinish:
+		var event starflow.FinishEvent
+		err := json.Unmarshal(metadataBytes, &event)
+		return event, err
 	default:
 		return nil, fmt.Errorf("unknown event type: %s", eventType)
 	}
-}
-
-// FinishRun updates the output of a run and typically sets status to COMPLETED.
-func (s *DynamoDBStore) FinishRun(ctx context.Context, runID string, output *anypb.Any) error {
-	updateExpression := "SET #status = :status, #output = :output, #updated_at = :updated_at"
-
-	_, err := s.client.UpdateItem(ctx, &dynamodb.UpdateItemInput{
-		TableName: aws.String(s.tableName),
-		Key: map[string]types.AttributeValue{
-			"run_id": &types.AttributeValueMemberS{Value: runID},
-		},
-		UpdateExpression:    aws.String(updateExpression),
-		ConditionExpression: aws.String("attribute_exists(#run_id) AND (#status = :pending OR #status = :running OR #status = :yielded)"),
-		ExpressionAttributeNames: map[string]string{
-			"#run_id":     "run_id",
-			"#status":     "status",
-			"#output":     "output",
-			"#updated_at": "updated_at",
-		},
-		ExpressionAttributeValues: map[string]types.AttributeValue{
-			":status":     &types.AttributeValueMemberS{Value: string(starflow.RunStatusCompleted)},
-			":pending":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusPending)},
-			":running":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusRunning)},
-			":yielded":    &types.AttributeValueMemberS{Value: string(starflow.RunStatusYielded)},
-			":output":     &types.AttributeValueMemberB{Value: output.Value},
-			":updated_at": &types.AttributeValueMemberS{Value: formatTimestamp(time.Now())},
-		},
-	})
-
-	if err != nil {
-		var conditionFailedErr *types.ConditionalCheckFailedException
-		if errors.As(err, &conditionFailedErr) {
-			return fmt.Errorf("run with ID %s not found or not in a valid state to finish", runID)
-		}
-		return fmt.Errorf("failed to finish run: %w", err)
-	}
-
-	return nil
 }
 
 // Helper method to convert DynamoDB item to Run

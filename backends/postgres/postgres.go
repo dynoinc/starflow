@@ -385,6 +385,18 @@ func (s *Store) RecordEvent(ctx context.Context, runID string, nextEventID int64
 			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
 			_, err = tx.ExecContext(ctx, updateQuery, nextEventID+1, runID)
 		}
+	case starflow.EventTypeFinish:
+		if finishEvent, ok := eventMetadata.(starflow.FinishEvent); ok {
+			outputBytes, err := proto.Marshal(finishEvent.Output)
+			if err != nil {
+				return 0, fmt.Errorf("failed to marshal output: %w", err)
+			}
+			updateQuery := `UPDATE runs SET status = $1, output = $2, next_event_id = $3, updated_at = NOW() WHERE id = $4`
+			_, err = tx.ExecContext(ctx, updateQuery, starflow.RunStatusCompleted, outputBytes, nextEventID+1, runID)
+		} else {
+			updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
+			_, err = tx.ExecContext(ctx, updateQuery, nextEventID+1, runID)
+		}
 	default:
 		updateQuery := `UPDATE runs SET next_event_id = $1, updated_at = NOW() WHERE id = $2`
 		_, err = tx.ExecContext(ctx, updateQuery, nextEventID+1, runID)
@@ -501,32 +513,6 @@ func (s *Store) GetEvents(ctx context.Context, runID string) ([]*starflow.Event,
 	return events, nil
 }
 
-// FinishRun updates the output of a run
-func (s *Store) FinishRun(ctx context.Context, runID string, output *anypb.Any) error {
-	outputBytes, err := proto.Marshal(output)
-	if err != nil {
-		return fmt.Errorf("failed to marshal output: %w", err)
-	}
-
-	query := `UPDATE runs SET status = $1, output = $2, updated_at = NOW() WHERE id = $3`
-
-	result, err := s.db.ExecContext(ctx, query, starflow.RunStatusCompleted, outputBytes, runID)
-	if err != nil {
-		return fmt.Errorf("failed to finish run: %w", err)
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("run with ID %s not found", runID)
-	}
-
-	return nil
-}
-
 // Helper methods
 func (s *Store) hashContent(content []byte) string {
 	hash := sha256.Sum256(content)
@@ -565,6 +551,10 @@ func (s *Store) deserializeEventMetadata(eventType starflow.EventType, metadataB
 		return event, err
 	case starflow.EventTypeResume:
 		var event starflow.ResumeEvent
+		err := json.Unmarshal(metadataBytes, &event)
+		return event, err
+	case starflow.EventTypeFinish:
+		var event starflow.FinishEvent
 		err := json.Unmarshal(metadataBytes, &event)
 		return event, err
 	default:

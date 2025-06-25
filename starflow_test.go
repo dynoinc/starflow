@@ -47,7 +47,7 @@ def main(ctx, input):
 
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 2)
+	require.Len(t, events, 3)
 	require.Equal(t, starflow.EventTypeCall, events[0].Type)
 	if callEvent, ok := events[0].AsCallEvent(); ok {
 		require.Equal(t, "starflow_test.pingFn", callEvent.FunctionName)
@@ -56,6 +56,7 @@ def main(ctx, input):
 	if returnEvent, ok := events[1].AsReturnEvent(); ok {
 		require.Empty(t, returnEvent.Error)
 	}
+	require.Equal(t, starflow.EventTypeFinish, events[2].Type)
 
 	var outputResp testpb.PingResponse
 	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
@@ -122,12 +123,13 @@ def main(ctx, input):
 	require.NoError(t, err)
 	require.NoError(t, err)
 
-	require.Equal(t, 4, len(events))
+	require.Equal(t, 5, len(events))
 
-	expectedFunctions := []string{"starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn"}
+	expectedFunctions := []string{"starflow_test.httpCallFn", "starflow_test.httpCallFn", "starflow_test.dbQueryFn", "starflow_test.dbQueryFn", ""}
 	expectedTypes := []starflow.EventType{
 		starflow.EventTypeCall, starflow.EventTypeReturn,
 		starflow.EventTypeCall, starflow.EventTypeReturn,
+		starflow.EventTypeFinish,
 	}
 
 	for i, event := range events {
@@ -403,7 +405,7 @@ def main(ctx, input):
 	// Verify events were recorded
 	events, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, events, 4) // 2 time.now events + 2 rand.int events
+	require.Len(t, events, 5) // 2 time.now events + 2 rand.int events + 1 finish event
 
 	// Check that we have the expected event types
 	timeNowCount := 0
