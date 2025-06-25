@@ -12,6 +12,12 @@ Every execution step is recorded and can be resumed exactly where it left off.
 Support for in-memory, DynamoDB, and PostgreSQL storage with easy extensibility for custom backends. 
 Choose the storage solution that fits your deployment environment and scale requirements.
 
+## Architecture
+
+Starflow primarily revolves around **Store**. **Clients** directly interact with store
+to create/query runs. One or more **Worker** in the background pick up workflow runs ready
+to run and execute the logic. 
+
 ## Installation
 
 ```bash
@@ -121,20 +127,6 @@ just lint   # Run linting and security checks
 - `just` or `just test` - Run the full test suite
 - `just gen` - Generate code and format imports
 - `just lint` - Run linting and security checks
-
-## Architecture
-
-Starflow primarily revolves around **Store**. **Clients** directly interact with store
-to create/query runs. One or more **Worker** in the background pick up workflow runs ready
-to run and execute the logic. 
-
-## Backends
-
-Starflow supports multiple storage backends:
-
-- **In-Memory**: For development and testing
-- **DynamoDB**: For production AWS deployments
-- **PostgreSQL**: For production deployments with relational databases
 
 ## Contributing
 
