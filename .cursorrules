@@ -22,7 +22,6 @@ Always use the `justfile` for testing and development tasks. The justfile provid
 
 This project contains multiple Go modules:
 - Main module: `github.com/dynoinc/starflow`
-- Backend modules: `backends/dynamodb`, `backends/postgres`
 - Test modules: `suite`, `suite/proto`
 
 The justfile ensures all modules are properly tested and linted.
