@@ -269,9 +269,13 @@ func (f FinishEvent) EventType() EventType        { return EventTypeFinish }
 func (f FinishEvent) Output() (*anypb.Any, error) { return f.output, f.err }
 
 func (f FinishEvent) MarshalJSON() ([]byte, error) {
+	var errStr string
+	if f.err != nil {
+		errStr = f.err.Error()
+	}
 	return json.Marshal(map[string]interface{}{
 		"output": f.output,
-		"error":  f.err,
+		"error":  errStr,
 	})
 }
 
@@ -320,6 +324,7 @@ func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	c.workerID = aux.WorkerID
+	c.until = aux.Until
 	return nil
 }
 
