@@ -469,17 +469,19 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 		}
 
 		var resp proto.Message
-		callFunc := func() error {
-			var innerErr error
-			resp, innerErr = regFn.fn(starlarkCtx.ctx, req)
-			if innerErr != nil {
-				if errors.Is(innerErr, &YieldError{}) {
-					return backoff.Permanent(innerErr)
+		callFunc := func() (err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("panic: %v", r)
 				}
-
-				return innerErr
+			}()
+			resp, err = regFn.fn(starlarkCtx.ctx, req)
+			if err != nil {
+				if errors.Is(err, &YieldError{}) {
+					return backoff.Permanent(err)
+				}
+				return err
 			}
-
 			return nil
 		}
 
@@ -511,6 +513,10 @@ func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output],
 			return starlark.None, err
 		}
 
-		return starlarkproto.MakeMessage(resp), callErr
+		if callErr != nil {
+			return starlark.None, callErr
+		}
+
+		return starlarkproto.MakeMessage(resp), nil
 	})
 }
