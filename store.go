@@ -23,8 +23,9 @@ type Store interface {
 	// Scripts - Methods to save/restore scripts.
 	//
 	// Invariants:
+	// - SaveScript verifies that the content hash matches the passed scriptHash.
 	// - Saving same script twice succeeds and returns the same hash.
-	SaveScript(ctx context.Context, content []byte) (string, error)
+	SaveScript(ctx context.Context, scriptHash string, content []byte) error
 	GetScript(ctx context.Context, scriptHash string) ([]byte, error)
 
 	// Runs - Methods to create/introspect runs.

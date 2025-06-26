@@ -62,7 +62,7 @@ func (c *Client[Input]) validateAndSave(ctx context.Context, script []byte) (str
 		return "", fmt.Errorf("script validation failed: %w", err)
 	}
 
-	scriptHash, err := c.store.SaveScript(ctx, script)
+	err := c.store.SaveScript(ctx, scriptHash, script)
 	if err != nil {
 		return "", fmt.Errorf("failed to save script: %w", err)
 	}

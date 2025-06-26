@@ -41,15 +41,19 @@ func NewInMemoryStore() *InMemoryStore {
 }
 
 // SaveScript persists the Starlark script content.
-func (s *InMemoryStore) SaveScript(ctx context.Context, content []byte) (string, error) {
+func (s *InMemoryStore) SaveScript(ctx context.Context, scriptHash string, content []byte) error {
 	hash := sha256.Sum256(content)
-	hashStr := hex.EncodeToString(hash[:])
+	computedHash := hex.EncodeToString(hash[:])
+
+	if computedHash != scriptHash {
+		return fmt.Errorf("content hash %s does not match provided scriptHash %s", computedHash, scriptHash)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.scripts[hashStr] = content
-	return hashStr, nil
+	s.scripts[scriptHash] = content
+	return nil
 }
 
 // GetScript retrieves a script by its sha256 hash.

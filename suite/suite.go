@@ -1,6 +1,8 @@
 package suite
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -16,6 +18,12 @@ import (
 // StoreFactory is a function that creates a new store instance for testing
 type StoreFactory func(t *testing.T) starflow.Store
 
+// computeScriptHash computes the SHA256 hash of script content
+func computeScriptHash(content []byte) string {
+	hash := sha256.Sum256(content)
+	return hex.EncodeToString(hash[:])
+}
+
 // RunStoreSuite runs the complete test suite against a store implementation
 func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Helper()
@@ -30,21 +38,38 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("ScriptIdempotent", func(t *testing.T) {
 		s := newStore(t)
 		content := []byte("print('hi')")
-		h1, err := s.SaveScript(ctx, content)
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		h2, err := s.SaveScript(ctx, content)
+		err = s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		require.Equal(t, h1, h2)
-		got, err := s.GetScript(t.Context(), h1)
+
+		got, err := s.GetScript(t.Context(), scriptHash)
 		require.NoError(t, err)
 		require.Equal(t, string(content), string(got))
 	})
 
+	t.Run("SaveScriptWithMismatchedHash", func(t *testing.T) {
+		s := newStore(t)
+		content := []byte("print('hi')")
+		wrongHash := "wrong-hash"
+
+		err := s.SaveScript(ctx, wrongHash, content)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "content hash")
+		require.Contains(t, err.Error(), "does not match provided scriptHash")
+	})
+
 	t.Run("CreateGetRun", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
@@ -53,9 +78,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("NextEventID", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -69,9 +98,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -93,9 +126,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("ReturnEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -114,9 +151,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("YieldEventUpdatesRunToYielded", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -132,9 +173,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("ClaimEventUpdatesRunToRunning", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -155,9 +200,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("ClaimEventWithConcurrentWorkers", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -179,11 +228,14 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("ClaimRunsConditions", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
 
 		// Test 1: Pending run should be claimed and returned
-		id1, err := s.CreateRun(ctx, sh, nil)
+		id1, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 		claimedRuns, err := s.ClaimRuns(ctx, "worker1", time.Now().Add(10*time.Second))
 		require.NoError(t, err)
@@ -193,7 +245,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, "worker1", claimedRuns[0].LeasedBy)
 
 		// Test 2: Run with expired lease should be claimed and returned by a new worker
-		id2, err := s.CreateRun(ctx, sh, nil)
+		id2, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 		// Manually record a claim event with an expired lease
 		run2, err := s.GetRun(ctx, id2)
@@ -209,7 +261,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, "worker2", claimedRuns[0].LeasedBy)
 
 		// Test 3: Run leased by different worker (not expired) should NOT be claimed
-		id3, err := s.CreateRun(ctx, sh, nil)
+		id3, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 		// Manually record a claim event with a valid lease
 		run3, err := s.GetRun(ctx, id3)
@@ -230,9 +282,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("FinishEventUpdatesRunToCompleted", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -250,9 +306,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("FinishEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -271,9 +331,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("GetEvents", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
-		id, err := s.CreateRun(ctx, sh, nil)
+
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
@@ -306,15 +370,19 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 	t.Run("SignalInvariants", func(t *testing.T) {
 		s := newStore(t)
-		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		content := []byte("print('hello')")
+		scriptHash := computeScriptHash(content)
+
+		err := s.SaveScript(ctx, scriptHash, content)
 		require.NoError(t, err)
+
 		// Test 1: Signaling with non-existent run ID succeeds silently
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
 		err = s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
 		require.NoError(t, err, "signaling with non-existent run ID should succeed silently")
 
 		// Test 2: Signaling with non-existent signal ID succeeds silently
-		id, err := s.CreateRun(ctx, sh, nil)
+		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
 		err = s.Signal(ctx, id, "non-existent-signal-id", output)
