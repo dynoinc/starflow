@@ -258,29 +258,35 @@ func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 // FinishEvent
 type FinishEvent struct {
 	output *anypb.Any
+	err    error
 }
 
-func NewFinishEvent(output *anypb.Any) FinishEvent {
-	return FinishEvent{output: output}
+func NewFinishEvent(output *anypb.Any, err error) FinishEvent {
+	return FinishEvent{output: output, err: err}
 }
 
-func (f FinishEvent) EventType() EventType { return EventTypeFinish }
-func (f FinishEvent) Output() *anypb.Any   { return f.output }
+func (f FinishEvent) EventType() EventType        { return EventTypeFinish }
+func (f FinishEvent) Output() (*anypb.Any, error) { return f.output, f.err }
 
 func (f FinishEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"output": f.output,
+		"error":  f.err,
 	})
 }
 
 func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
 		Output *anypb.Any `json:"output"`
+		Error  string     `json:"error"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
 	f.output = aux.Output
+	if aux.Error != "" {
+		f.err = fmt.Errorf("%s", aux.Error)
+	}
 	return nil
 }
 

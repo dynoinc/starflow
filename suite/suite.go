@@ -239,13 +239,34 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewFinishEvent(output))
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewFinishEvent(output, nil))
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, starflow.RunStatusCompleted, run.Status)
 		require.NotNil(t, run.Output)
+	})
+
+	t.Run("FinishEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
+		id, err := s.CreateRun(ctx, sh, nil)
+		require.NoError(t, err)
+
+		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+
+		testError := errors.New("test finish error")
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewFinishEvent(nil, testError))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusFailed, run.Status)
+		require.Error(t, run.Error)
+		require.Equal(t, testError.Error(), run.Error.Error())
 	})
 
 	t.Run("GetEvents", func(t *testing.T) {

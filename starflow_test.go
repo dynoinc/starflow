@@ -271,6 +271,7 @@ def main(ctx, input):
 		events.EventTypeClaim,
 		events.EventTypeCall,
 		events.EventTypeReturn,
+		events.EventTypeFinish,
 	)
 }
 
@@ -551,7 +552,7 @@ def main(ctx, input):
 
 	s.assertRunStatus(runID, starflow.RunStatusFailed)
 	s.Require().Error(run.Error)
-	s.Require().Contains(run.Error.Error(), "not found")
+	s.Require().Contains(run.Error.Error(), "module has no .NonExistentFunction field or method")
 }
 
 // TestWorkflow_PanickingFunction tests a registered function that panics.

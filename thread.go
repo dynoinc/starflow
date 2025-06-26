@@ -329,6 +329,14 @@ func runThread[Input proto.Message, Output proto.Message](
 	// Call main with context and input
 	starlarkOutput, err := starlark.Call(thread, mainFn, starlark.Tuple{starlarkCtx, starlarkInput}, nil)
 	if err != nil {
+		var yerr *YieldError
+		if errors.As(err, &yerr) {
+			return zero, err
+		}
+
+		if recordErr := t.recorder.recordEvent(ctx, events.NewFinishEvent(nil, err)); recordErr != nil {
+			return zero, fmt.Errorf("failed to record finish event with error: %w", recordErr)
+		}
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
 
@@ -346,7 +354,7 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := t.recorder.recordEvent(ctx, events.NewFinishEvent(outputAny)); err != nil {
+	if err := t.recorder.recordEvent(ctx, events.NewFinishEvent(outputAny, nil)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 

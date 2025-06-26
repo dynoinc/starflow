@@ -184,8 +184,14 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		}
 	case events.EventTypeFinish:
 		if finishEvent, ok := event.Metadata.(events.FinishEvent); ok {
-			storedRun.Status = RunStatusCompleted
-			storedRun.Output = finishEvent.Output()
+			output, err := finishEvent.Output()
+			if err != nil {
+				storedRun.Status = RunStatusFailed
+				storedRun.Error = err
+			} else {
+				storedRun.Status = RunStatusCompleted
+				storedRun.Output = output
+			}
 		}
 	case events.EventTypeClaim:
 		if claimEvent, ok := event.Metadata.(events.ClaimEvent); ok {

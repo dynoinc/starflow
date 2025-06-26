@@ -58,6 +58,7 @@ type Store interface {
 	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
+	// - If event is a finish event with error, run will be updated to be in status RunStatusFailed with the error.
 	// - If event is a claim event, run will be updated to be in status RunStatusRunning. A run can be claimed by a worker if:
 	//   - Its current status is RunStatusPending.
 	//   - Its current status is RunStatusRunning AND it is already leased by the same worker (for lease renewal).
