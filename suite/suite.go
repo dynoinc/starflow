@@ -177,61 +177,55 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, starflow.RunStatusRunning, run.Status)
 	})
 
-	t.Run("ClaimableRunsConditions", func(t *testing.T) {
+	t.Run("ClaimRunsConditions", func(t *testing.T) {
 		s := newStore(t)
 		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
 		require.NoError(t, err)
-		// Test 1: Pending run should be claimable
+
+		// Test 1: Pending run should be claimed and returned
 		id1, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-		runs, err := s.ClaimableRuns(ctx)
+		claimedRuns, err := s.ClaimRuns(ctx, "worker1", time.Now().Add(10*time.Second))
 		require.NoError(t, err)
-		require.Len(t, runs, 1)
-		require.Equal(t, id1, runs[0].ID)
+		require.Len(t, claimedRuns, 1)
+		require.Equal(t, id1, claimedRuns[0].ID)
+		require.Equal(t, starflow.RunStatusRunning, claimedRuns[0].Status)
+		require.Equal(t, "worker1", claimedRuns[0].LeasedBy)
 
-		// Test 2: Run leased by same worker (renewal) should be claimable
-		_, err = s.RecordEvent(ctx, id1, 0, events.NewClaimEvent("worker1", time.Now().Add(10*time.Second)))
-		require.NoError(t, err)
-		runs, err = s.ClaimableRuns(ctx)
-		require.NoError(t, err)
-		require.Len(t, runs, 1)
-		require.Equal(t, id1, runs[0].ID)
-
-		// Test 3: Run with expired lease should be claimable
+		// Test 2: Run with expired lease should be claimed and returned by a new worker
 		id2, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-		_, err = s.RecordEvent(ctx, id2, 0, events.NewClaimEvent("worker2", time.Now().Add(-1*time.Second)))
+		// Manually record a claim event with an expired lease
+		run2, err := s.GetRun(ctx, id2)
 		require.NoError(t, err)
-		runs, err = s.ClaimableRuns(ctx)
+		_, err = s.RecordEvent(ctx, id2, run2.NextEventID, events.NewClaimEvent("worker_old", time.Now().Add(-1*time.Second)))
 		require.NoError(t, err)
-		require.Len(t, runs, 2)
-		// Order might not be guaranteed, so check for presence
-		found1, found2 := false, false
-		for _, r := range runs {
-			if r.ID == id1 {
-				found1 = true
-			}
-			if r.ID == id2 {
-				found2 = true
-			}
-		}
-		require.True(t, found1 && found2)
 
-		// Test 4: Run leased by different worker (not expired) should NOT be claimable by ClaimableRuns
+		claimedRuns, err = s.ClaimRuns(ctx, "worker2", time.Now().Add(10*time.Second))
+		require.NoError(t, err)
+		require.Len(t, claimedRuns, 1)
+		require.Equal(t, id2, claimedRuns[0].ID)
+		require.Equal(t, starflow.RunStatusRunning, claimedRuns[0].Status)
+		require.Equal(t, "worker2", claimedRuns[0].LeasedBy)
+
+		// Test 3: Run leased by different worker (not expired) should NOT be claimed
 		id3, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
-		_, err = s.RecordEvent(ctx, id3, 0, events.NewClaimEvent("worker3", time.Now().Add(10*time.Second)))
+		// Manually record a claim event with a valid lease
+		run3, err := s.GetRun(ctx, id3)
 		require.NoError(t, err)
-		runs, err = s.ClaimableRuns(ctx)
+		_, err = s.RecordEvent(ctx, id3, run3.NextEventID, events.NewClaimEvent("worker_valid", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
-		require.Len(t, runs, 2) // Should still be id1 and id2, not id3
-		found3 := false
-		for _, r := range runs {
-			if r.ID == id3 {
-				found3 = true
-			}
-		}
-		require.False(t, found3)
+
+		claimedRuns, err = s.ClaimRuns(ctx, "worker4", time.Now().Add(10*time.Second))
+		require.NoError(t, err)
+		require.Len(t, claimedRuns, 0) // No runs should be claimed
+
+		// Verify the status of id3 remains unchanged
+		run3AfterClaim, err := s.GetRun(ctx, id3)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusRunning, run3AfterClaim.Status)
+		require.Equal(t, "worker_valid", run3AfterClaim.LeasedBy)
 	})
 
 	t.Run("FinishEventUpdatesRunToCompleted", func(t *testing.T) {

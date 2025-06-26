@@ -106,23 +106,41 @@ func (s *InMemoryStore) GetRun(ctx context.Context, runID string) (*Run, error) 
 	return &runCopy, nil
 }
 
-// ClaimableRuns retrieves runs that are either pending or their lease has expired.
-func (s *InMemoryStore) ClaimableRuns(ctx context.Context) ([]*Run, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// ClaimRuns finds runs that are either in RunStatusPending or in RunStatusRunning with an expired lease,
+// records a ClaimEvent for each, and returns the updated runs.
+func (s *InMemoryStore) ClaimRuns(ctx context.Context, workerID string, leaseUntil time.Time) ([]*Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	var runs []*Run
+	var claimedRuns []*Run
 	now := time.Now()
 
 	for _, run := range s.runs {
 		if run.Status == RunStatusPending ||
 			(run.Status == RunStatusRunning && run.LeasedUntil.Before(now)) {
+
+			// Create and record the claim event.
+			claimEvent := events.NewClaimEvent(workerID, leaseUntil)
+			event := &events.Event{
+				Timestamp: now,
+				Metadata:  claimEvent,
+			}
+			s.events[run.ID] = append(s.events[run.ID], event)
+
+			// Update the run state.
+			run.Status = RunStatusRunning
+			run.LeasedBy = workerID
+			run.LeasedUntil = leaseUntil
+			run.NextEventID++
+			run.UpdatedAt = now
+
+			// Add a copy to the result.
 			runCopy := *run
-			runs = append(runs, &runCopy)
+			claimedRuns = append(claimedRuns, &runCopy)
 		}
 	}
 
-	return runs, nil
+	return claimedRuns, nil
 }
 
 // RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.

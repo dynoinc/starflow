@@ -179,8 +179,7 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
 	require.NoError(t, err)
 
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	worker.ProcessOnce(t.Context())
+	wf.ProcessOnce(t.Context())
 
 	// Fetch run output
 	run, err := client.GetRun(t.Context(), runID)

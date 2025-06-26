@@ -201,7 +201,7 @@ func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDe
 // This method is useful for manual processing or testing scenarios.
 // For continuous processing, use Start() instead.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	runs, err := w.store.ClaimableRuns(ctx)
+	runs, err := w.store.ClaimRuns(ctx, w.workerID, time.Now().Add(w.leaseDuration))
 	if err != nil {
 		return
 	}
@@ -224,15 +224,6 @@ func (w *Worker[Input, Output]) processRun(ctx context.Context, run *Run) error 
 	defer leaseCancel()
 
 	recorder := newRecorder(w.store, run)
-
-	// Initial lease claim
-	// This will update run.LeasedUntil in the store
-	if err := recorder.recordEvent(
-		ctx,
-		events.NewClaimEvent(w.workerID, time.Now().Add(w.leaseDuration)),
-	); err != nil {
-		return fmt.Errorf("failed to claim run: %w", err)
-	}
 
 	// Use a channel to signal completion or error from the main execution
 	done := make(chan error, 1)
