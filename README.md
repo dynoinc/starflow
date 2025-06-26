@@ -41,7 +41,7 @@ func main() {
     store := starflow.NewInMemoryStore()
     
     // Create a worker
-    worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store)
+    worker := starflow.NewWorker[*wrapperspb.StringValue](store)
     
     // Register your functions
     echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {

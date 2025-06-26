@@ -20,14 +20,14 @@ import (
 type WorkflowTestSuite struct {
 	suite.Suite
 	store  starflow.Store
-	worker *starflow.Worker[*testpb.PingRequest, *testpb.PingResponse]
+	worker *starflow.Worker[*testpb.PingRequest]
 	client *starflow.Client[*testpb.PingRequest]
 }
 
 // SetupTest initializes a new store, worker, and client for each test.
 func (s *WorkflowTestSuite) SetupTest() {
 	s.store = starflow.NewInMemoryStore()
-	s.worker = starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](s.store)
+	s.worker = starflow.NewWorker[*testpb.PingRequest](s.store)
 	s.client = starflow.NewClient[*testpb.PingRequest](s.store)
 	starflow.RegisterProto(s.worker, testpb.File_suite_proto_ping_proto)
 

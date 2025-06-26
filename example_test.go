@@ -16,7 +16,7 @@ func Example() {
 	store := starflow.NewInMemoryStore()
 
 	// Create a worker with 10ms poll interval
-	worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store)
+	worker := starflow.NewWorker[*wrapperspb.StringValue](store)
 
 	// Register a simple echo function
 	echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
@@ -70,7 +70,7 @@ func Example_worker() {
 	store := starflow.NewInMemoryStore()
 
 	// Create a worker
-	worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store)
+	worker := starflow.NewWorker[*wrapperspb.StringValue](store)
 
 	// Register a function
 	processFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {

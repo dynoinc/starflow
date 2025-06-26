@@ -59,11 +59,11 @@ func WithRetryPolicy(b backoff.BackOff) Option {
 }
 
 // WorkerOption configures behaviour of a worker.
-type WorkerOption func(*Worker[proto.Message, proto.Message])
+type WorkerOption func(*Worker[proto.Message])
 
 // WithPollInterval sets the poll interval for the worker.
 func WithPollInterval(interval time.Duration) WorkerOption {
-	return func(w *Worker[proto.Message, proto.Message]) {
+	return func(w *Worker[proto.Message]) {
 		w.pollDuration = interval
 	}
 }
@@ -71,7 +71,7 @@ func WithPollInterval(interval time.Duration) WorkerOption {
 // WithLeaseDuration sets the lease duration for workflow runs.
 // The lease will be renewed at half this duration.
 func WithLeaseDuration(duration time.Duration) WorkerOption {
-	return func(w *Worker[proto.Message, proto.Message]) {
+	return func(w *Worker[proto.Message]) {
 		w.leaseDuration = duration
 		w.leaseRenewalRate = duration / 2
 	}
@@ -80,7 +80,7 @@ func WithLeaseDuration(duration time.Duration) WorkerOption {
 // WithLeaseRenewalRate sets the lease renewal rate.
 // This should be less than the lease duration to ensure continuous renewal.
 func WithLeaseRenewalRate(rate time.Duration) WorkerOption {
-	return func(w *Worker[proto.Message, proto.Message]) {
+	return func(w *Worker[proto.Message]) {
 		w.leaseRenewalRate = rate
 	}
 }
@@ -100,8 +100,8 @@ func newCustomProtoRegistry() *customProtoRegistry {
 
 // Worker executes pending workflow runs in the background.
 // It polls the store for claimable runs and processes them using registered functions.
-// The worker is parameterized by the input and output types which must be protobuf messages.
-type Worker[Input proto.Message, Output proto.Message] struct {
+// The worker is parameterized by the input type which must be a protobuf message.
+type Worker[Input proto.Message] struct {
 	store    Store
 	workerID string
 
@@ -115,8 +115,8 @@ type Worker[Input proto.Message, Output proto.Message] struct {
 }
 
 // NewWorker creates a worker for a workflow with the given poll interval.
-func NewWorker[Input proto.Message, Output proto.Message](store Store, opts ...WorkerOption) *Worker[Input, Output] {
-	worker := &Worker[Input, Output]{
+func NewWorker[Input proto.Message](store Store, opts ...WorkerOption) *Worker[Input] {
+	worker := &Worker[Input]{
 		store:    store,
 		workerID: shortuuid.New(),
 
@@ -131,7 +131,7 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, opts ...W
 	}
 
 	for _, opt := range opts {
-		opt((*Worker[proto.Message, proto.Message])(worker))
+		opt((*Worker[proto.Message])(worker))
 	}
 
 	return worker
@@ -143,8 +143,8 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, opts ...W
 //
 // The function will be automatically named based on its package and function name,
 // or you can override this using the WithName option.
-func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
-	w *Worker[Input, Output],
+func RegisterFunc[Input proto.Message, Req proto.Message, Res proto.Message](
+	w *Worker[Input],
 	fn func(ctx context.Context, req Req) (Res, error),
 	opts ...Option,
 ) {
@@ -193,14 +193,14 @@ func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, 
 
 // RegisterProto registers a proto file descriptor with the worker's proto registry.
 // This allows Starlark scripts to access the proto definitions.
-func RegisterProto[Input proto.Message, Output proto.Message](w *Worker[Input, Output], fileDescriptor protoreflect.FileDescriptor) {
+func RegisterProto[Input proto.Message](w *Worker[Input], fileDescriptor protoreflect.FileDescriptor) {
 	w.protoRegistry.customFiles[fileDescriptor.Path()] = fileDescriptor
 }
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 // This method is useful for manual processing or testing scenarios.
 // For continuous processing, use Start() instead.
-func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
+func (w *Worker[Input]) ProcessOnce(ctx context.Context) {
 	runs, err := w.store.ClaimRuns(ctx, w.workerID, time.Now().Add(w.leaseDuration))
 	if err != nil {
 		return
@@ -219,7 +219,7 @@ func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
 	wg.Wait()
 }
 
-func (w *Worker[Input, Output]) processRun(ctx context.Context, run *Run) error {
+func (w *Worker[Input]) processRun(ctx context.Context, run *Run) error {
 	leaseCtx, leaseCancel := context.WithCancel(ctx)
 	defer leaseCancel()
 
@@ -262,7 +262,7 @@ func (w *Worker[Input, Output]) processRun(ctx context.Context, run *Run) error 
 }
 
 // Start begins a background goroutine that polls for and executes pending runs.
-func (w *Worker[Input, Output]) Start(ctx context.Context) {
+func (w *Worker[Input]) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(w.pollDuration)
 		defer ticker.Stop()

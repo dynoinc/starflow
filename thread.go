@@ -24,12 +24,12 @@ import (
 )
 
 // thread executes a single workflow run.
-type thread[Input proto.Message, Output proto.Message] struct {
+type thread[Input proto.Message] struct {
 	recorder *eventRecorder
 	events   []*events.Event
 }
 
-func popEvent[ET events.EventMetadata, Input proto.Message, Output proto.Message](t *thread[Input, Output]) (ET, error, bool) {
+func popEvent[ET events.EventMetadata, Input proto.Message](t *thread[Input]) (ET, error, bool) {
 	var zero ET
 	if len(t.events) == 0 {
 		return zero, nil, false
@@ -45,17 +45,10 @@ func popEvent[ET events.EventMetadata, Input proto.Message, Output proto.Message
 }
 
 // createInputInstance creates a new instance of the Input type using reflection
-func (t *thread[Input, Output]) createInputInstance() Input {
+func (t *thread[Input]) createInputInstance() Input {
 	var zero Input
 	inputType := reflect.TypeOf(zero).Elem()
 	return reflect.New(inputType).Interface().(Input)
-}
-
-// createOutputInstance creates a new instance of the Output type using reflection
-func (t *thread[Input, Output]) createOutputInstance() Output {
-	var zero Output
-	outputType := reflect.TypeOf(zero).Elem()
-	return reflect.New(outputType).Interface().(Output)
 }
 
 // starlarkModule represents a module in Starlark
@@ -87,7 +80,7 @@ func (m *starlarkModule) AttrNames() []string {
 	return names
 }
 
-func (t *thread[Input, Output]) globals(registry map[string]registeredFn) (starlark.StringDict, error) {
+func (t *thread[Input]) globals(registry map[string]registeredFn) (starlark.StringDict, error) {
 	globals := make(starlark.StringDict)
 
 	// Group functions by module
@@ -114,7 +107,7 @@ func (t *thread[Input, Output]) globals(registry map[string]registeredFn) (starl
 }
 
 // makeSleepBuiltin returns a starlark builtin implementing durable sleep.
-func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
+func (t *thread[Input]) makeSleepBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("sleep", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var durationVal starlark.Value
@@ -161,7 +154,7 @@ func (t *thread[Input, Output]) makeSleepBuiltin() *starlark.Builtin {
 }
 
 // makeTimeNowBuiltin returns a starlark builtin implementing deterministic time.now.
-func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
+func (t *thread[Input]) makeTimeNowBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("now", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		if err := starlark.UnpackArgs("now", args, kwargs, "ctx", &ctxVal); err != nil {
@@ -194,7 +187,7 @@ func (t *thread[Input, Output]) makeTimeNowBuiltin() *starlark.Builtin {
 }
 
 // makeRandIntBuiltin returns a starlark builtin implementing deterministic rand.int.
-func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
+func (t *thread[Input]) makeRandIntBuiltin() *starlark.Builtin {
 	return starlark.NewBuiltin("int", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var maxVal starlark.Value
@@ -235,15 +228,15 @@ func (t *thread[Input, Output]) makeRandIntBuiltin() *starlark.Builtin {
 	})
 }
 
-func runThread[Input proto.Message, Output proto.Message](
+func runThread[Input proto.Message](
 	ctx context.Context,
-	w *Worker[Input, Output],
+	w *Worker[Input],
 	run *Run,
 	recorder *eventRecorder,
-) (Output, error) {
-	t := &thread[Input, Output]{recorder: recorder}
+) (proto.Message, error) {
+	t := &thread[Input]{recorder: recorder}
 
-	var zero Output
+	var zero proto.Message
 	script, err := w.store.GetScript(ctx, run.ScriptHash)
 	if err != nil {
 		return zero, fmt.Errorf("failed to get script: %w", err)
@@ -344,13 +337,13 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
 
-	output := t.createOutputInstance()
+	var output proto.Message
 	if starlarkOutput != starlark.None {
 		pm, ok := starlarkOutput.(*starlarkproto.Message)
 		if !ok {
 			return zero, fmt.Errorf("main return value is not a proto message, got %s", starlarkOutput.Type())
 		}
-		proto.Merge(output, pm.ProtoReflect().Interface())
+		output = pm.ProtoReflect().Interface()
 	}
 
 	outputAny, err := anypb.New(output)
@@ -377,7 +370,7 @@ func (sc *starlarkContext) Truth() starlark.Bool  { return starlark.True }
 func (sc *starlarkContext) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: context") }
 
 // wrapFn wraps a Go function to be callable from Starlark.
-func wrapFn[Input proto.Message, Output proto.Message](t *thread[Input, Output], regFn registeredFn) *starlark.Builtin {
+func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark.Builtin {
 	return starlark.NewBuiltin(regFn.name, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var reqVal starlark.Value
