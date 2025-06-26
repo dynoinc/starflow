@@ -2,8 +2,11 @@ package starflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
+	"sync"
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -15,7 +18,8 @@ import (
 
 // Client provides an interface for creating and managing workflow runs.
 type Client[Input proto.Message] struct {
-	store Store
+	store       Store
+	scriptCache sync.Map // map[string]string (scriptHash -> savedScriptHash)
 }
 
 // NewClient creates a new workflow client with the specified input type.
@@ -46,26 +50,36 @@ func (c *Client[Input]) validateScript(script []byte) error {
 	return fmt.Errorf("script must contain a main function")
 }
 
-// Run creates a new workflow run with the given script and input, returning the run ID.
-// The script should be valid Starlark code with a main function that accepts context and input parameters.
-// The input is serialized as a protobuf Any message for storage and execution.
-func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (string, error) {
-	// Validate script before saving
+func (c *Client[Input]) validateAndSave(ctx context.Context, script []byte) (string, error) {
+	hash := sha256.Sum256(script)
+	scriptHash := hex.EncodeToString(hash[:])
+
+	if _, ok := c.scriptCache.Load(scriptHash); ok {
+		return scriptHash, nil
+	}
+
 	if err := c.validateScript(script); err != nil {
 		return "", fmt.Errorf("script validation failed: %w", err)
 	}
 
-	// Save script
 	scriptHash, err := c.store.SaveScript(ctx, script)
 	if err != nil {
 		return "", fmt.Errorf("failed to save script: %w", err)
 	}
 
-	return c.createRunWithHash(ctx, scriptHash, input)
+	c.scriptCache.Store(scriptHash, scriptHash)
+	return scriptHash, nil
 }
 
-// createRunWithHash creates a run with the given script hash and input
-func (c *Client[Input]) createRunWithHash(ctx context.Context, scriptHash string, input Input) (string, error) {
+// Run creates a new workflow run with the given script and input, returning the run ID.
+// The script should be valid Starlark code with a main function that accepts context and input parameters.
+// The input is serialized as a protobuf Any message for storage and execution.
+func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (string, error) {
+	scriptHash, err := c.validateAndSave(ctx, script)
+	if err != nil {
+		return "", fmt.Errorf("failed to validate and save script: %w", err)
+	}
+
 	// Convert input to anypb.Any
 	var inputAny *anypb.Any
 	inputVal := reflect.ValueOf(input)
