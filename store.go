@@ -30,6 +30,14 @@ type Store interface {
 	//
 	// Invariants:
 	// - Creating a run with a non-existent script hash fails.
+	// - GetRun returns a deep copy of the run state at the time of retrieval, ensuring that external modifications to the returned object do not affect the stored run object.
+	// - ClaimableRuns returns runs that are either in RunStatusPending or in RunStatusRunning with an expired lease.
+	// - Run status transitions are strictly defined:
+	//   - Pending -> Running (via Claim event)
+	//   - Running -> Yielded (via Yield event)
+	//   - Running -> Failed (via Return event with error)
+	//   - Running -> Completed (via Finish event)
+	//   - Yielded -> Pending (via Signal method)
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimableRuns(ctx context.Context) ([]*Run, error)
@@ -45,11 +53,15 @@ type Store interface {
 	//
 	// Invariants:
 	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID.
+	// - Events for a given run are recorded sequentially, and NextEventID always reflects the expected next sequence number for an event, incrementing by one upon successful record.
 	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
-	// - If event is a claim event, run will be updated to be in status RunStatusRunning, if worker can claim it.
-	//   - A run can be claimed if it is in status RunStatusPending or claimed by the same worker or lease has expired.
+	// - If event is a claim event, run will be updated to be in status RunStatusRunning. A run can be claimed by a worker if:
+	//   - Its current status is RunStatusPending.
+	//   - Its current status is RunStatusRunning AND it is already leased by the same worker (for lease renewal).
+	//   - Its current status is RunStatusRunning AND its lease has expired.
+	// - Upon a successful claim event, the run's LeasedBy field is set to the claiming worker's ID and LeasedUntil is set to the provided lease expiry timestamp.
 	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error)
 	GetEvents(ctx context.Context, runID string) ([]*events.Event, error)
 }

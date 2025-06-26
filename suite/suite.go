@@ -19,18 +19,16 @@ type StoreFactory func(t *testing.T) starflow.Store
 // RunStoreSuite runs the complete test suite against a store implementation
 func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Helper()
-	s := newStore(t)
 	ctx := t.Context()
 
-	sh, err := s.SaveScript(ctx, []byte("print('hello')"))
-	require.NoError(t, err)
-
 	t.Run("CreateRunWithNonExistentScriptHash", func(t *testing.T) {
+		s := newStore(t)
 		_, err := s.CreateRun(ctx, "non-existent-hash", nil)
 		require.Error(t, err)
 	})
 
 	t.Run("ScriptIdempotent", func(t *testing.T) {
+		s := newStore(t)
 		content := []byte("print('hi')")
 		h1, err := s.SaveScript(ctx, content)
 		require.NoError(t, err)
@@ -43,6 +41,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("CreateGetRun", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 		run, err := s.GetRun(ctx, id)
@@ -51,6 +52,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("NextEventID", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -64,6 +68,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -79,11 +86,15 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("RecordEventWithInvalidRunID", func(t *testing.T) {
+		s := newStore(t)
 		_, err := s.RecordEvent(ctx, "non-existent-run-id", 0, events.NewCallEvent("fn", nil))
 		require.Error(t, err, "recording event with invalid runID should fail")
 	})
 
 	t.Run("ReturnEventWithErrorUpdatesRunToFailed", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -102,6 +113,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("YieldEventUpdatesRunToYielded", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -117,6 +131,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimEventUpdatesRunToRunning", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -137,6 +154,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("ClaimEventWithConcurrentWorkers", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -150,14 +170,74 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		// Second claim should fail due to optimistic concurrency
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker2", time.Now().Add(10*time.Second)))
 		require.Error(t, err)
-		require.Equal(t, starflow.ErrConcurrentUpdate, err)
+		require.Equal(t, err, starflow.ErrConcurrentUpdate)
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 		require.Equal(t, starflow.RunStatusRunning, run.Status)
 	})
 
+	t.Run("ClaimableRunsConditions", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
+		// Test 1: Pending run should be claimable
+		id1, err := s.CreateRun(ctx, sh, nil)
+		require.NoError(t, err)
+		runs, err := s.ClaimableRuns(ctx)
+		require.NoError(t, err)
+		require.Len(t, runs, 1)
+		require.Equal(t, id1, runs[0].ID)
+
+		// Test 2: Run leased by same worker (renewal) should be claimable
+		_, err = s.RecordEvent(ctx, id1, 0, events.NewClaimEvent("worker1", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+		runs, err = s.ClaimableRuns(ctx)
+		require.NoError(t, err)
+		require.Len(t, runs, 1)
+		require.Equal(t, id1, runs[0].ID)
+
+		// Test 3: Run with expired lease should be claimable
+		id2, err := s.CreateRun(ctx, sh, nil)
+		require.NoError(t, err)
+		_, err = s.RecordEvent(ctx, id2, 0, events.NewClaimEvent("worker2", time.Now().Add(-1*time.Second)))
+		require.NoError(t, err)
+		runs, err = s.ClaimableRuns(ctx)
+		require.NoError(t, err)
+		require.Len(t, runs, 2)
+		// Order might not be guaranteed, so check for presence
+		found1, found2 := false, false
+		for _, r := range runs {
+			if r.ID == id1 {
+				found1 = true
+			}
+			if r.ID == id2 {
+				found2 = true
+			}
+		}
+		require.True(t, found1 && found2)
+
+		// Test 4: Run leased by different worker (not expired) should NOT be claimable by ClaimableRuns
+		id3, err := s.CreateRun(ctx, sh, nil)
+		require.NoError(t, err)
+		_, err = s.RecordEvent(ctx, id3, 0, events.NewClaimEvent("worker3", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+		runs, err = s.ClaimableRuns(ctx)
+		require.NoError(t, err)
+		require.Len(t, runs, 2) // Should still be id1 and id2, not id3
+		found3 := false
+		for _, r := range runs {
+			if r.ID == id3 {
+				found3 = true
+			}
+		}
+		require.False(t, found3)
+	})
+
 	t.Run("FinishEventUpdatesRunToCompleted", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -175,6 +255,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("GetEvents", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		id, err := s.CreateRun(ctx, sh, nil)
 		require.NoError(t, err)
 
@@ -207,9 +290,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	})
 
 	t.Run("SignalInvariants", func(t *testing.T) {
+		s := newStore(t)
+		sh, err := s.SaveScript(ctx, []byte("print('hello')"))
+		require.NoError(t, err)
 		// Test 1: Signaling with non-existent run ID succeeds silently
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
-		err := s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
+		err = s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
 		require.NoError(t, err, "signaling with non-existent run ID should succeed silently")
 
 		// Test 2: Signaling with non-existent signal ID succeeds silently
