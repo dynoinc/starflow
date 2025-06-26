@@ -137,13 +137,13 @@ func NewWorker[Input proto.Message, Output proto.Message](store Store, opts ...W
 	return worker
 }
 
-// Register registers a Go function to be callable from Starlark using generics and reflection.
+// RegisterFunc registers a Go function to be callable from Starlark using generics and reflection.
 // The function must have the signature: func(ctx context.Context, req ReqType) (ResType, error)
 // where ReqType and ResType implement proto.Message.
 //
 // The function will be automatically named based on its package and function name,
 // or you can override this using the WithName option.
-func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
+func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
 	w *Worker[Input, Output],
 	fn func(ctx context.Context, req Req) (Res, error),
 	opts ...Option,
@@ -193,7 +193,7 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 
 // RegisterProto registers a proto file descriptor with the worker's proto registry.
 // This allows Starlark scripts to access the proto definitions.
-func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) {
+func RegisterProto[Input proto.Message, Output proto.Message](w *Worker[Input, Output], fileDescriptor protoreflect.FileDescriptor) {
 	w.protoRegistry.customFiles[fileDescriptor.Path()] = fileDescriptor
 }
 
@@ -275,25 +275,6 @@ func (w *Worker[Input, Output]) Start(ctx context.Context) {
 			}
 		}
 	}()
-}
-
-// GetLeaseDuration returns the current lease duration.
-func (w *Worker[Input, Output]) GetLeaseDuration() time.Duration {
-	return w.leaseDuration
-}
-
-// GetLeaseRenewalRate returns the current lease renewal rate.
-func (w *Worker[Input, Output]) GetLeaseRenewalRate() time.Duration {
-	return w.leaseRenewalRate
-}
-
-// RegisteredNames returns the registered function names (for testing/debugging)
-func (w *Worker[Input, Output]) RegisteredNames() []string {
-	names := make([]string, 0, len(w.registry))
-	for name := range w.registry {
-		names = append(names, name)
-	}
-	return names
 }
 
 func (r *customProtoRegistry) FindDescriptorByName(name protoreflect.FullName) (protoreflect.Descriptor, error) {

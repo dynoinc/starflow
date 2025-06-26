@@ -26,12 +26,12 @@ func TestWorkflow(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
 	}
-	starflow.Register(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
+	starflow.RegisterFunc(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
 
 	script := `
 load("proto", "proto")
@@ -75,7 +75,7 @@ func TestWorkflow_ReplaySupport(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	httpCallFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "HTTP response simulated"}, nil
@@ -84,8 +84,8 @@ func TestWorkflow_ReplaySupport(t *testing.T) {
 		return &testpb.PingResponse{Message: "DB result for: " + req.Message}, nil
 	}
 
-	starflow.Register(wf, httpCallFn, starflow.WithName("starflow_test.httpCallFn"))
-	starflow.Register(wf, dbQueryFn, starflow.WithName("starflow_test.dbQueryFn"))
+	starflow.RegisterFunc(wf, httpCallFn, starflow.WithName("starflow_test.httpCallFn"))
+	starflow.RegisterFunc(wf, dbQueryFn, starflow.WithName("starflow_test.dbQueryFn"))
 
 	script := `
 load("proto", "proto")
@@ -158,12 +158,12 @@ func TestWorkflow_StarlarkMathImport(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
 	}
-	starflow.Register(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
+	starflow.RegisterFunc(wf, pingFn, starflow.WithName("starflow_test.pingFn"))
 
 	script := `
 load("proto", "proto")
@@ -194,7 +194,7 @@ func TestWorkflow_RetryPolicy(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	attempts := 0
 	flakyFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -206,7 +206,7 @@ func TestWorkflow_RetryPolicy(t *testing.T) {
 	}
 
 	policy := backoff.WithMaxRetries(backoff.NewConstantBackOff(1*time.Millisecond), 3)
-	starflow.Register(wf, flakyFn, starflow.WithName("starflow_test.flakyFn"), starflow.WithRetryPolicy(policy))
+	starflow.RegisterFunc(wf, flakyFn, starflow.WithName("starflow_test.flakyFn"), starflow.WithRetryPolicy(policy))
 
 	script := `
 load("proto", "proto")
@@ -243,7 +243,7 @@ func TestWorkflow_SleepFunction(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	script := `
 load("proto", "proto")
@@ -270,13 +270,13 @@ func TestWorkflow_Failure(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	// Register a function that always fails
 	failingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
 		return nil, fmt.Errorf("intentional failure: %s", req.Message)
 	}
-	starflow.Register(wf, failingFn, starflow.WithName("starflow_test.failingFn"))
+	starflow.RegisterFunc(wf, failingFn, starflow.WithName("starflow_test.failingFn"))
 
 	script := `
 load("proto", "proto")
@@ -346,12 +346,9 @@ func TestWorkflow_FullPackagePath(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
-	starflow.Register(wf, PingPong, starflow.WithName("tests_test.PingPong"))
-	for _, name := range wf.RegisteredNames() {
-		t.Logf("Registered: %s", name)
-	}
+	starflow.RegisterFunc(wf, PingPong, starflow.WithName("tests_test.PingPong"))
 
 	script := `
 load("proto", "proto")
@@ -377,11 +374,11 @@ def main(ctx, input):
 	require.Equal(t, "pong: test", outputResp.Message)
 }
 
-func TestWorkflow_DeterministicFunctions(t *testing.T) {
+func TestWorkflow_YieldAndSignal(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	var runID, cid string
 	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -389,31 +386,24 @@ func TestWorkflow_DeterministicFunctions(t *testing.T) {
 		runID, cid, err = starflow.NewYieldError(ctx)
 		return nil, err
 	}
-	starflow.Register(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
+	starflow.RegisterFunc(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
 
 	script := `
 load("proto", "proto")
-load("time", time_now="now")
-load("rand", rand_int="int")
-
-ping_proto = proto.file("suite/proto/ping.proto")
 
 def main(ctx, input):
-	now = time_now(ctx=ctx)
-	rand = rand_int(ctx=ctx, max=100)
-
-	starflow_test.yieldFn(ctx=ctx, req=input)
-	return ping_proto.PingResponse(message="now: " + str(now) + ", rand: " + str(rand))
+	ping_proto = proto.file("suite/proto/ping.proto")
+	starflow_test.yieldFn(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+	return ping_proto.PingResponse(message="resumed")
 `
 
 	client := starflow.NewClient[*testpb.PingRequest](store)
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
 	require.NoError(t, err)
 
-	// Process the workflow
+	// Process the workflow, it should yield
 	wf.ProcessOnce(t.Context())
 
-	// Fetch run output
 	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusYielded, run.Status)
@@ -425,18 +415,54 @@ def main(ctx, input):
 	err = client.Signal(t.Context(), runID, cid, outputAny)
 	require.NoError(t, err)
 
+	// Process again, it should complete
 	wf.ProcessOnce(t.Context())
 
-	// Verify events were recorded
 	run, err = client.GetRun(t.Context(), runID)
+	require.NoError(t, err)
+	require.Equal(t, starflow.RunStatusCompleted, run.Status)
+
+	var outputResp testpb.PingResponse
+	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
+	require.Equal(t, "resumed", outputResp.Message)
+
+	t.Log("✅ Yield and Signal test completed successfully!")
+}
+
+func TestWorkflow_DeterministicBuiltins(t *testing.T) {
+	store := starflow.NewInMemoryStore()
+
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
+
+	script := `
+load("proto", "proto")
+load("time", time_now="now")
+load("rand", rand_int="int")
+
+ping_proto = proto.file("suite/proto/ping.proto")
+
+def main(ctx, input):
+	now = time_now(ctx=ctx)
+	rand = rand_int(ctx=ctx, max=100)
+	return ping_proto.PingResponse(message="now: " + str(now) + ", rand: " + str(rand))
+`
+
+	client := starflow.NewClient[*testpb.PingRequest](store)
+	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
+	require.NoError(t, err)
+
+	wf.ProcessOnce(t.Context())
+
+	run, err := client.GetRun(t.Context(), runID)
 	require.NoError(t, err)
 	require.Equal(t, starflow.RunStatusCompleted, run.Status)
 
 	runEvents, err := client.GetEvents(t.Context(), runID)
 	require.NoError(t, err)
-	require.Len(t, runEvents, 8)
+	// Claim, Call(time.now), Return(time.now), Call(rand.int), Return(rand.int), Finish
+	require.Len(t, runEvents, 4)
 
-	// Check that we have the expected event types
 	timeNowCount := 0
 	randIntCount := 0
 	for _, event := range runEvents {
@@ -450,23 +476,19 @@ def main(ctx, input):
 	require.Equal(t, 1, timeNowCount, "Expected 1 time.now events")
 	require.Equal(t, 1, randIntCount, "Expected 1 rand.int events")
 
-	// Verify the output contains the expected values
 	var outputResp testpb.PingResponse
 	require.NoError(t, run.Output.UnmarshalTo(&outputResp))
 	require.Contains(t, outputResp.Message, "now:")
 	require.Contains(t, outputResp.Message, "rand:")
 
-	t.Log("✅ Deterministic functions test completed successfully!")
-	t.Logf("Run ID: %s", runID)
-	t.Logf("Output: %s", outputResp.Message)
-	t.Logf("Events recorded: %d", len(runEvents))
+	t.Log("✅ Deterministic built-ins test completed successfully!")
 }
 
 func TestWorkflow_YieldError(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
 	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
-	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
+	starflow.RegisterProto(wf, testpb.File_suite_proto_ping_proto)
 
 	var called int
 	var runID, cid string
@@ -478,7 +500,7 @@ func TestWorkflow_YieldError(t *testing.T) {
 		runID, cid, err = starflow.NewYieldError(ctx)
 		return nil, err
 	}
-	starflow.Register(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
+	starflow.RegisterFunc(wf, yieldFn, starflow.WithName("starflow_test.yieldFn"))
 
 	script := `
 load("proto", "proto")

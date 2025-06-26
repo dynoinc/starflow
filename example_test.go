@@ -22,7 +22,7 @@ func Example() {
 	echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
 		return &wrapperspb.StringValue{Value: "echo: " + req.Value}, nil
 	}
-	starflow.Register(worker, echoFn, starflow.WithName("module.echoFn"))
+	starflow.RegisterFunc(worker, echoFn, starflow.WithName("module.echoFn"))
 
 	// Create a client
 	client := starflow.NewClient[*wrapperspb.StringValue](store)
@@ -76,7 +76,7 @@ func Example_worker() {
 	processFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
 		return &wrapperspb.StringValue{Value: "processed: " + req.Value}, nil
 	}
-	starflow.Register(worker, processFn, starflow.WithName("module.processFn"))
+	starflow.RegisterFunc(worker, processFn, starflow.WithName("module.processFn"))
 
 	// Start the worker in a goroutine
 	ctx, cancel := context.WithCancel(context.Background())
