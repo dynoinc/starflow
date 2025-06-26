@@ -106,19 +106,17 @@ func (s *InMemoryStore) GetRun(ctx context.Context, runID string) (*Run, error) 
 	return &runCopy, nil
 }
 
-// ClaimableRuns retrieves runs that are either pending or haven't been updated recently.
-func (s *InMemoryStore) ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*Run, error) {
+// ClaimableRuns retrieves runs that are either pending or their lease has expired.
+func (s *InMemoryStore) ClaimableRuns(ctx context.Context) ([]*Run, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var runs []*Run
-	staleTime := time.Now().Add(-staleThreshold)
+	now := time.Now()
 
 	for _, run := range s.runs {
 		if run.Status == RunStatusPending ||
-			(run.Status == RunStatusRunning && run.UpdatedAt.Before(staleTime)) ||
-			(run.Status == RunStatusYielded && run.UpdatedAt.Before(staleTime)) {
-			// Create a copy to avoid external modifications
+			(run.Status == RunStatusRunning && run.LeasedUntil.Before(now)) {
 			runCopy := *run
 			runs = append(runs, &runCopy)
 		}
@@ -172,7 +170,11 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 			storedRun.Output = finishEvent.Output()
 		}
 	case events.EventTypeClaim:
-		storedRun.Status = RunStatusRunning
+		if claimEvent, ok := event.Metadata.(events.ClaimEvent); ok {
+			storedRun.Status = RunStatusRunning
+			storedRun.LeasedBy = claimEvent.WorkerID()
+			storedRun.LeasedUntil = claimEvent.Until()
+		}
 	}
 
 	storedRun.NextEventID++

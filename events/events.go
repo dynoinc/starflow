@@ -287,24 +287,28 @@ func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 // ClaimEvent
 type ClaimEvent struct {
 	workerID string
+	until    time.Time
 }
 
-func NewClaimEvent(workerID string) ClaimEvent {
-	return ClaimEvent{workerID: workerID}
+func NewClaimEvent(workerID string, until time.Time) ClaimEvent {
+	return ClaimEvent{workerID: workerID, until: until}
 }
 
 func (c ClaimEvent) EventType() EventType { return EventTypeClaim }
 func (c ClaimEvent) WorkerID() string     { return c.workerID }
+func (c ClaimEvent) Until() time.Time     { return c.until }
 
 func (c ClaimEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"workerID": c.workerID,
+		"until":    c.until,
 	})
 }
 
 func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		WorkerID string `json:"workerID"`
+		WorkerID string    `json:"workerID"`
+		Until    time.Time `json:"until"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

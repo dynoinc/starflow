@@ -14,7 +14,6 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 
@@ -59,6 +58,33 @@ func WithRetryPolicy(b backoff.BackOff) Option {
 	}
 }
 
+// WorkerOption configures behaviour of a worker.
+type WorkerOption func(*Worker[proto.Message, proto.Message])
+
+// WithPollInterval sets the poll interval for the worker.
+func WithPollInterval(interval time.Duration) WorkerOption {
+	return func(w *Worker[proto.Message, proto.Message]) {
+		w.pollDuration = interval
+	}
+}
+
+// WithLeaseDuration sets the lease duration for workflow runs.
+// The lease will be renewed at half this duration.
+func WithLeaseDuration(duration time.Duration) WorkerOption {
+	return func(w *Worker[proto.Message, proto.Message]) {
+		w.leaseDuration = duration
+		w.leaseRenewalRate = duration / 2
+	}
+}
+
+// WithLeaseRenewalRate sets the lease renewal rate.
+// This should be less than the lease duration to ensure continuous renewal.
+func WithLeaseRenewalRate(rate time.Duration) WorkerOption {
+	return func(w *Worker[proto.Message, proto.Message]) {
+		w.leaseRenewalRate = rate
+	}
+}
+
 // customProtoRegistry combines the global registry with custom proto files
 type customProtoRegistry struct {
 	globalRegistry *protoregistry.Files
@@ -78,33 +104,37 @@ func newCustomProtoRegistry() *customProtoRegistry {
 type Worker[Input proto.Message, Output proto.Message] struct {
 	store    Store
 	workerID string
-	poll     time.Duration
 
 	registry      map[string]registeredFn
 	types         map[string]proto.Message
-	protoRegistry protodesc.Resolver
+	protoRegistry *customProtoRegistry
+
+	pollDuration     time.Duration
+	leaseDuration    time.Duration
+	leaseRenewalRate time.Duration
 }
 
 // NewWorker creates a worker for a workflow with the given poll interval.
-// The poll interval determines how frequently the worker checks for new runs to process.
-// If poll is 0, it defaults to 1 second.
-func NewWorker[Input proto.Message, Output proto.Message](store Store, poll time.Duration) *Worker[Input, Output] {
-	if poll == 0 {
-		poll = time.Second
-	}
-
-	// Create a new proto registry that includes well-known types
-	protoRegistry := newCustomProtoRegistry()
-
-	return &Worker[Input, Output]{
+func NewWorker[Input proto.Message, Output proto.Message](store Store, opts ...WorkerOption) *Worker[Input, Output] {
+	worker := &Worker[Input, Output]{
 		store:    store,
 		workerID: shortuuid.New(),
-		poll:     poll,
 
 		registry:      make(map[string]registeredFn),
 		types:         make(map[string]proto.Message),
-		protoRegistry: protoRegistry,
+		protoRegistry: newCustomProtoRegistry(),
+
+		// Default lease management - 30 second lease, renew every 15 seconds
+		pollDuration:     time.Second,
+		leaseDuration:    30 * time.Second,
+		leaseRenewalRate: 15 * time.Second,
 	}
+
+	for _, opt := range opts {
+		opt((*Worker[proto.Message, proto.Message])(worker))
+	}
+
+	return worker
 }
 
 // Register registers a Go function to be callable from Starlark using generics and reflection.
@@ -163,50 +193,87 @@ func Register[Input proto.Message, Output proto.Message, Req proto.Message, Res 
 
 // RegisterProto registers a proto file descriptor with the worker's proto registry.
 // This allows Starlark scripts to access the proto definitions.
-func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) error {
-	if reg, ok := w.protoRegistry.(*customProtoRegistry); ok {
-		reg.customFiles[fileDescriptor.Path()] = fileDescriptor
-		return nil
-	}
-	return fmt.Errorf("protoRegistry is not a customProtoRegistry")
+func (w *Worker[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) {
+	w.protoRegistry.customFiles[fileDescriptor.Path()] = fileDescriptor
 }
 
 // ProcessOnce processes all runs that are in PENDING or WAITING state exactly once.
 // This method is useful for manual processing or testing scenarios.
 // For continuous processing, use Start() instead.
 func (w *Worker[Input, Output]) ProcessOnce(ctx context.Context) {
-	runs, err := w.store.ClaimableRuns(ctx, 30*time.Second)
+	runs, err := w.store.ClaimableRuns(ctx)
 	if err != nil {
 		return
 	}
 
 	var wg sync.WaitGroup
-	for _, r := range runs {
+	for _, run := range runs {
 		wg.Add(1)
-		go func(run *Run) {
+		go func() {
 			defer wg.Done()
-
-			ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-			defer cancel()
-
-			recorder := newRecorder(w.store, run)
-			if err := recorder.recordEvent(ctx, events.NewClaimEvent(w.workerID)); err != nil {
-				slog.Error("failed to claim run", "run_id", run.ID, "error", err)
-				return
+			if err := w.processRun(ctx, run); err != nil {
+				slog.Error("failed to process run", "run_id", run.ID, "error", err)
 			}
-
-			if _, err := runThread(ctx, w, run, recorder); err != nil {
-				slog.Error("failed to resume run", "run_id", run.ID, "error", err)
-			}
-		}(r)
+		}()
 	}
 	wg.Wait()
+}
+
+func (w *Worker[Input, Output]) processRun(ctx context.Context, run *Run) error {
+	leaseCtx, leaseCancel := context.WithCancel(ctx)
+	defer leaseCancel()
+
+	recorder := newRecorder(w.store, run)
+
+	// Initial lease claim
+	// This will update run.LeasedUntil in the store
+	if err := recorder.recordEvent(
+		ctx,
+		events.NewClaimEvent(w.workerID, time.Now().Add(w.leaseDuration)),
+	); err != nil {
+		return fmt.Errorf("failed to claim run: %w", err)
+	}
+
+	// Use a channel to signal completion or error from the main execution
+	done := make(chan error, 1)
+	go func() {
+		_, err := runThread(leaseCtx, w, run, recorder)
+		done <- err
+	}()
+
+	// Set up a timer for lease management
+	timer := time.NewTimer(w.leaseRenewalRate)
+	defer timer.Stop()
+
+	for {
+		select {
+		case err := <-done:
+			// Main execution finished, return its error (or nil)
+			return err
+		case <-timer.C:
+			// Time to renew the lease
+			// This will update run.LeasedUntil in the store again
+			if err := recorder.recordEvent(
+				ctx,
+				events.NewClaimEvent(w.workerID, time.Now().Add(w.leaseDuration)),
+			); err != nil {
+				// If renewal fails, cancel the lease context and return the error
+				leaseCancel()
+				return fmt.Errorf("failed to renew lease: %w", err)
+			}
+			// Reset the timer for the next renewal
+			timer.Reset(w.leaseRenewalRate)
+		case <-ctx.Done():
+			// Worker context cancelled, stop processing
+			return ctx.Err()
+		}
+	}
 }
 
 // Start begins a background goroutine that polls for and executes pending runs.
 func (w *Worker[Input, Output]) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(w.poll)
+		ticker := time.NewTicker(w.pollDuration)
 		defer ticker.Stop()
 		for {
 			select {
@@ -217,6 +284,16 @@ func (w *Worker[Input, Output]) Start(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// GetLeaseDuration returns the current lease duration.
+func (w *Worker[Input, Output]) GetLeaseDuration() time.Duration {
+	return w.leaseDuration
+}
+
+// GetLeaseRenewalRate returns the current lease renewal rate.
+func (w *Worker[Input, Output]) GetLeaseRenewalRate() time.Duration {
+	return w.leaseRenewalRate
 }
 
 // RegisteredNames returns the registered function names (for testing/debugging)

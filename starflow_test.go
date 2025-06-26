@@ -25,7 +25,7 @@ func TestInMemoryStore(t *testing.T) {
 func TestWorkflow(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -74,7 +74,7 @@ def main(ctx, input):
 func TestWorkflow_ReplaySupport(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	httpCallFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -157,7 +157,7 @@ def main(ctx, input):
 func TestWorkflow_StarlarkMathImport(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	pingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
@@ -179,7 +179,7 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "test"})
 	require.NoError(t, err)
 
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	worker.ProcessOnce(t.Context())
 
 	// Fetch run output
@@ -194,7 +194,7 @@ def main(ctx, input):
 func TestWorkflow_RetryPolicy(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	attempts := 0
@@ -243,7 +243,7 @@ def main(ctx, input):
 func TestWorkflow_SleepFunction(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	script := `
@@ -260,7 +260,7 @@ def main(ctx, input):
 	runID, err := client.Run(t.Context(), []byte(script), &testpb.PingRequest{Message: "zzz"})
 	require.NoError(t, err)
 
-	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	worker := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	worker.ProcessOnce(t.Context()) // should complete
 
 	run, _ := client.GetRun(t.Context(), runID)
@@ -270,7 +270,7 @@ def main(ctx, input):
 func TestWorkflow_Failure(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	// Register a function that always fails
@@ -346,7 +346,7 @@ func PingPong(ctx context.Context, req *testpb.PingRequest) (*testpb.PingRespons
 func TestWorkflow_FullPackagePath(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	starflow.Register(wf, PingPong, starflow.WithName("tests_test.PingPong"))
@@ -381,7 +381,7 @@ def main(ctx, input):
 func TestWorkflow_DeterministicFunctions(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	var runID, cid string
@@ -466,7 +466,7 @@ def main(ctx, input):
 func TestWorkflow_YieldError(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	wf.RegisterProto(testpb.File_suite_proto_ping_proto)
 
 	var called int
@@ -522,7 +522,7 @@ def main(ctx, input):
 func TestWorkflow_StringValue(t *testing.T) {
 	store := starflow.NewInMemoryStore()
 
-	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store, 10*time.Millisecond)
+	wf := starflow.NewWorker[*testpb.PingRequest, *testpb.PingResponse](store)
 	// Note: No proto registration needed for well-known types
 
 	script := `

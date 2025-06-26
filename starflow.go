@@ -93,4 +93,8 @@ type Run struct {
 	// Set when finished.
 	Output *anypb.Any
 	Error  error
+
+	// Lease
+	LeasedBy    string
+	LeasedUntil time.Time
 }

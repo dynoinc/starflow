@@ -3,6 +3,7 @@ package suite
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -122,7 +123,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("test-worker"))
+		_, err = s.RecordEvent(
+			ctx,
+			id,
+			run.NextEventID,
+			events.NewClaimEvent("test-worker", time.Now().Add(10*time.Second)),
+		)
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
@@ -138,11 +144,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		// First claim should succeed
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker1"))
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker1", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
 
 		// Second claim should fail due to optimistic concurrency
-		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker2"))
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker2", time.Now().Add(10*time.Second)))
 		require.Error(t, err)
 		require.Equal(t, starflow.ErrConcurrentUpdate, err)
 

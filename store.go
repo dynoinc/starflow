@@ -3,7 +3,6 @@ package starflow
 import (
 	"context"
 	"errors"
-	"time"
 
 	"google.golang.org/protobuf/types/known/anypb"
 
@@ -33,7 +32,7 @@ type Store interface {
 	// - Creating a run with a non-existent script hash fails.
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
-	ClaimableRuns(ctx context.Context, staleThreshold time.Duration) ([]*Run, error)
+	ClaimableRuns(ctx context.Context) ([]*Run, error)
 
 	// Signals - Methods to signal a run.
 	//
@@ -49,7 +48,8 @@ type Store interface {
 	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
-	// - If event is a claim event, run will be updated to be in status RunStatusRunning.
+	// - If event is a claim event, run will be updated to be in status RunStatusRunning, if worker can claim it.
+	//   - A run can be claimed if it is in status RunStatusPending or claimed by the same worker or lease has expired.
 	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error)
 	GetEvents(ctx context.Context, runID string) ([]*events.Event, error)
 }
