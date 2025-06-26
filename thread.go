@@ -308,6 +308,10 @@ func runThread[Input proto.Message, Output proto.Message](
 	}
 	globalsAfterExec, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "script", script, globals)
 	if err != nil {
+		// Record finish event with error for script execution failures
+		if recordErr := t.recorder.recordEvent(ctx, events.NewFinishEvent(nil, err)); recordErr != nil {
+			return zero, fmt.Errorf("failed to record finish event with error: %w", recordErr)
+		}
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
 

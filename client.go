@@ -8,6 +8,8 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
+	"go.starlark.net/syntax"
+
 	"github.com/dynoinc/starflow/events"
 )
 
@@ -24,20 +26,51 @@ func NewClient[Input proto.Message](store Store) *Client[Input] {
 	}
 }
 
+// validateScript performs validation on the Starlark script.
+// It checks for syntax errors and ensures the script has a main function.
+func (c *Client[Input]) validateScript(script []byte) error {
+	// Parse the script to check for syntax errors
+	parsed, err := (&syntax.FileOptions{}).Parse("script", script, 0)
+	if err != nil {
+		return fmt.Errorf("script syntax error: %w", err)
+	}
+
+	for _, stmt := range parsed.Stmts {
+		if defStmt, ok := stmt.(*syntax.DefStmt); ok {
+			if defStmt.Name.Name == "main" {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("script must contain a main function")
+}
+
 // Run creates a new workflow run with the given script and input, returning the run ID.
 // The script should be valid Starlark code with a main function that accepts context and input parameters.
 // The input is serialized as a protobuf Any message for storage and execution.
 func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (string, error) {
+	// Validate script before saving
+	if err := c.validateScript(script); err != nil {
+		return "", fmt.Errorf("script validation failed: %w", err)
+	}
+
 	// Save script
 	scriptHash, err := c.store.SaveScript(ctx, script)
 	if err != nil {
 		return "", fmt.Errorf("failed to save script: %w", err)
 	}
 
+	return c.createRunWithHash(ctx, scriptHash, input)
+}
+
+// createRunWithHash creates a run with the given script hash and input
+func (c *Client[Input]) createRunWithHash(ctx context.Context, scriptHash string, input Input) (string, error) {
 	// Convert input to anypb.Any
 	var inputAny *anypb.Any
 	inputVal := reflect.ValueOf(input)
 	if !inputVal.IsNil() {
+		var err error
 		inputAny, err = anypb.New(input)
 		if err != nil {
 			return "", fmt.Errorf("failed to convert input to anypb.Any: %w", err)

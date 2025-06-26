@@ -493,16 +493,14 @@ func (s *WorkflowTestSuite) TestWorkflow_StarlarkSyntaxError() {
 	script := `
 load("proto", "proto")
 
-def main(ctx, input):
+def main(ctx, input)
 	ping_proto = proto.file("suite/proto/ping.proto")
 	return ping_proto.PingResponse(message=input.message)
-	# Missing closing brace
 `
-	runID, run := s.runWorkflow(script, &testpb.PingRequest{Message: "test"})
-
-	s.assertRunStatus(runID, starflow.RunStatusFailed)
-	s.Require().Error(run.Error)
-	s.Require().Contains(run.Error.Error(), "syntax error")
+	runID, err := s.client.Run(context.Background(), []byte(script), &testpb.PingRequest{Message: "test"})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "syntax error")
+	s.Require().Empty(runID)
 }
 
 // TestWorkflow_StarlarkRuntimeError tests handling of runtime errors in Starlark scripts.
@@ -537,6 +535,21 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusFailed)
 	s.Require().Error(run.Error)
 	s.Require().Contains(run.Error.Error(), "undefined")
+}
+
+// TestWorkflow_MissingMainFunction tests handling of scripts without a main function.
+func (s *WorkflowTestSuite) TestWorkflow_MissingMainFunction() {
+	script := `
+load("proto", "proto")
+
+def helper_function(ctx, input):
+	ping_proto = proto.file("suite/proto/ping.proto")
+	return ping_proto.PingResponse(message=input.message)
+`
+	runID, err := s.client.Run(context.Background(), []byte(script), &testpb.PingRequest{Message: "test"})
+	s.Require().Error(err)
+	s.Require().Contains(err.Error(), "main function")
+	s.Require().Empty(runID)
 }
 
 // TestWorkflow_NonExistentFunction tests calling a non-existent registered function.
