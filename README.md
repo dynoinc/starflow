@@ -31,7 +31,6 @@ package main
 
 import (
     "context"
-    "time"
     
     "github.com/dynoinc/starflow"
     "google.golang.org/protobuf/types/known/wrapperspb"
@@ -42,7 +41,7 @@ func main() {
     store := starflow.NewInMemoryStore()
     
     // Create a worker
-    worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store, 10*time.Millisecond)
+    worker := starflow.NewWorker[*wrapperspb.StringValue, *wrapperspb.StringValue](store)
     
     // Register your functions
     echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
