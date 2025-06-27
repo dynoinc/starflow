@@ -4,14 +4,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/lithammer/shortuuid/v4"
 
 	"github.com/dynoinc/starflow"
 	"github.com/dynoinc/starflow/events"
-	testpb "github.com/dynoinc/starflow/suite/proto"
 )
+
+// Test data structures for JSON-based suite tests
+type TestResponse struct {
+	Message string `json:"message"`
+}
 
 // StoreFactory is a function that creates a new store instance for testing
 type StoreFactory func(t *testing.T) starflow.Store
@@ -86,7 +89,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("OnlyYieldEventsCanBeResumed", func(t *testing.T) {
 		s := newStore(t)
 		runID := shortuuid.New()
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
+		output := TestResponse{Message: "test"}
 
 		// Create a run with a call event
 		_, err := s.RecordEvent(ctx, runID, 0, events.NewStartEvent("script-hash", nil))
@@ -104,7 +107,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("SignalIDMustMatchYieldEvent", func(t *testing.T) {
 		s := newStore(t)
 		runID := shortuuid.New()
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
+		output := TestResponse{Message: "test"}
 
 		// Create a run with call then yield
 		_, err := s.RecordEvent(ctx, runID, 0, events.NewStartEvent("script-hash", nil))
@@ -257,7 +260,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("ResumeEventsIgnoreSequentialEventID", func(t *testing.T) {
 		s := newStore(t)
 		runID := shortuuid.New()
-		output, _ := anypb.New(&testpb.PingResponse{Message: "test"})
+		output := TestResponse{Message: "test"}
 
 		// Create a run with call then yield
 		_, err := s.RecordEvent(ctx, runID, 0, events.NewStartEvent("script-hash", nil))

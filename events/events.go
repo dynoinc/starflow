@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-
-	"google.golang.org/protobuf/types/known/anypb"
 )
 
 // EventType represents the type of an event in the execution history.
@@ -30,19 +28,19 @@ type EventMetadata interface {
 	EventType() EventType
 }
 
-// CallEvent metadata
+// CallEvent metadata - now uses any for maximum flexibility
 type CallEvent struct {
 	functionName string
-	input        *anypb.Any
+	input        any // Can be any JSON-serializable value
 }
 
-func NewCallEvent(functionName string, input *anypb.Any) CallEvent {
+func NewCallEvent(functionName string, input any) CallEvent {
 	return CallEvent{functionName: functionName, input: input}
 }
 
 func (c CallEvent) EventType() EventType { return EventTypeCall }
 func (c CallEvent) FunctionName() string { return c.functionName }
-func (c CallEvent) Input() *anypb.Any    { return c.input }
+func (c CallEvent) Input() any           { return c.input }
 
 func (c CallEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
@@ -53,8 +51,8 @@ func (c CallEvent) MarshalJSON() ([]byte, error) {
 
 func (c *CallEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		FunctionName string     `json:"functionName"`
-		Input        *anypb.Any `json:"input"`
+		FunctionName string `json:"functionName"`
+		Input        any    `json:"input"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -64,18 +62,18 @@ func (c *CallEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ReturnEvent metadata
+// ReturnEvent metadata - now uses any for maximum flexibility
 type ReturnEvent struct {
-	output *anypb.Any
+	output any // Can be any JSON-serializable value
 	err    error
 }
 
-func NewReturnEvent(output *anypb.Any, err error) ReturnEvent {
+func NewReturnEvent(output any, err error) ReturnEvent {
 	return ReturnEvent{output: output, err: err}
 }
 
-func (r ReturnEvent) EventType() EventType        { return EventTypeReturn }
-func (r ReturnEvent) Output() (*anypb.Any, error) { return r.output, r.err }
+func (r ReturnEvent) EventType() EventType { return EventTypeReturn }
+func (r ReturnEvent) Output() (any, error) { return r.output, r.err }
 
 func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 	var errStr string
@@ -90,8 +88,8 @@ func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 
 func (r *ReturnEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Output *anypb.Any `json:"output"`
-		Error  string     `json:"error"`
+		Output any    `json:"output"`
+		Error  string `json:"error"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -224,19 +222,19 @@ func (y *YieldEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ResumeEvent
+// ResumeEvent - now uses any for maximum flexibility
 type ResumeEvent struct {
 	signalID string
-	output   *anypb.Any
+	output   any // Can be any JSON-serializable value
 }
 
-func NewResumeEvent(signalID string, output *anypb.Any) ResumeEvent {
+func NewResumeEvent(signalID string, output any) ResumeEvent {
 	return ResumeEvent{signalID: signalID, output: output}
 }
 
 func (r ResumeEvent) EventType() EventType { return EventTypeResume }
 func (r ResumeEvent) SignalID() string     { return r.signalID }
-func (r ResumeEvent) Output() *anypb.Any   { return r.output }
+func (r ResumeEvent) Output() any          { return r.output }
 
 func (r ResumeEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
@@ -247,8 +245,8 @@ func (r ResumeEvent) MarshalJSON() ([]byte, error) {
 
 func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		SignalID string     `json:"signalID"`
-		Output   *anypb.Any `json:"output"`
+		SignalID string `json:"signalID"`
+		Output   any    `json:"output"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -258,18 +256,18 @@ func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// FinishEvent
+// FinishEvent - now uses any for maximum flexibility
 type FinishEvent struct {
-	output *anypb.Any
+	output any // Can be any JSON-serializable value
 	err    error
 }
 
-func NewFinishEvent(output *anypb.Any, err error) FinishEvent {
+func NewFinishEvent(output any, err error) FinishEvent {
 	return FinishEvent{output: output, err: err}
 }
 
-func (f FinishEvent) EventType() EventType        { return EventTypeFinish }
-func (f FinishEvent) Output() (*anypb.Any, error) { return f.output, f.err }
+func (f FinishEvent) EventType() EventType { return EventTypeFinish }
+func (f FinishEvent) Output() (any, error) { return f.output, f.err }
 
 func (f FinishEvent) MarshalJSON() ([]byte, error) {
 	var errStr string
@@ -284,8 +282,8 @@ func (f FinishEvent) MarshalJSON() ([]byte, error) {
 
 func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		Output *anypb.Any `json:"output"`
-		Error  string     `json:"error"`
+		Output any    `json:"output"`
+		Error  string `json:"error"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -297,20 +295,19 @@ func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// StartEvent metadata
-// Contains the scriptHash and input for starting a run.
+// StartEvent metadata - now uses any for maximum flexibility
 type StartEvent struct {
 	scriptHash string
-	input      *anypb.Any
+	input      any // Can be any JSON-serializable value
 }
 
-func NewStartEvent(scriptHash string, input *anypb.Any) StartEvent {
+func NewStartEvent(scriptHash string, input any) StartEvent {
 	return StartEvent{scriptHash: scriptHash, input: input}
 }
 
 func (s StartEvent) EventType() EventType { return EventTypeStart }
 func (s StartEvent) ScriptHash() string   { return s.scriptHash }
-func (s StartEvent) Input() *anypb.Any    { return s.input }
+func (s StartEvent) Input() any           { return s.input }
 
 func (s StartEvent) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
@@ -321,8 +318,8 @@ func (s StartEvent) MarshalJSON() ([]byte, error) {
 
 func (s *StartEvent) UnmarshalJSON(data []byte) error {
 	var aux struct {
-		ScriptHash string     `json:"scriptHash"`
-		Input      *anypb.Any `json:"input"`
+		ScriptHash string `json:"scriptHash"`
+		Input      any    `json:"input"`
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err

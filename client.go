@@ -15,16 +15,13 @@ package starflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
 	"reflect"
 	"runtime"
 	"strings"
-
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"go.starlark.net/syntax"
 
@@ -35,9 +32,7 @@ import (
 )
 
 type registeredFn struct {
-	fn          func(ctx context.Context, req proto.Message) (proto.Message, error)
-	reqType     proto.Message
-	resType     proto.Message
+	fn          func(ctx context.Context, req any) (any, error)
 	name        string
 	retryPolicy backoff.BackOff
 }
@@ -65,62 +60,61 @@ func WithRetryPolicy(b backoff.BackOff) Option {
 }
 
 // Client provides an interface for creating and managing workflow runs.
-type Client[Input proto.Message, Output proto.Message] struct {
+type Client[Input any, Output any] struct {
 	store Store
 
-	registry      map[string]registeredFn
-	types         map[string]proto.Message
-	protoRegistry *customProtoRegistry
+	registry map[string]registeredFn
 }
 
 // NewClient creates a new workflow client with the specified input type.
 // The client uses the provided store for persistence and workflow management.
-func NewClient[Input proto.Message, Output proto.Message](store Store) *Client[Input, Output] {
+func NewClient[Input any, Output any](store Store) *Client[Input, Output] {
 	return &Client[Input, Output]{
-		store:         store,
-		registry:      make(map[string]registeredFn),
-		types:         make(map[string]proto.Message),
-		protoRegistry: newCustomProtoRegistry(),
+		store:    store,
+		registry: make(map[string]registeredFn),
 	}
 }
 
 // RegisterFunc registers a Go function to be callable from Starlark using generics and reflection.
 // The function must have the signature: func(ctx context.Context, req ReqType) (ResType, error)
-// where ReqType and ResType implement proto.Message.
+// where ReqType and ResType are JSON-serializable types.
 //
 // The function will be automatically named based on its package and function name,
 // or you can override this using the WithName option.
-func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
+func RegisterFunc[Input any, Output any, Req any, Res any](
 	c *Client[Input, Output],
 	fn func(ctx context.Context, req Req) (Res, error),
 	opts ...Option,
 ) {
-	// Create instances to get the types (not zero values)
-	var req Req
-	var res Res
+	// Wrap the typed function to work with any
+	wrappedFn := func(ctx context.Context, reqData any) (any, error) {
+		var typedReq Req
 
-	// Use reflection to create actual instances
-	reqType := reflect.TypeOf(req).Elem()
-	resType := reflect.TypeOf(res).Elem()
+		if reqData != nil {
+			// Convert any to typed request via JSON marshaling
+			reqBytes, err := json.Marshal(reqData)
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal request: %w", err)
+			}
 
-	reqInstance := reflect.New(reqType).Interface().(proto.Message)
-	resInstance := reflect.New(resType).Interface().(proto.Message)
+			if err := json.Unmarshal(reqBytes, &typedReq); err != nil {
+				return nil, fmt.Errorf("failed to unmarshal request: %w", err)
+			}
+		}
+		// If reqData is nil, typedReq will be the zero value
 
-	// Wrap the typed function to match the expected signature
-	wrappedFn := func(ctx context.Context, reqMsg proto.Message) (proto.Message, error) {
-		// Cast the proto.Message to the specific type
-		typedReq, ok := reqMsg.(Req)
-		if !ok {
-			return nil, fmt.Errorf("invalid request type: expected %T, got %T", req, reqMsg)
+		// Call the actual function
+		res, err := fn(ctx, typedReq)
+		if err != nil {
+			return nil, err
 		}
 
-		return fn(ctx, typedReq)
+		// Return response as-is (Go will convert to any)
+		return res, nil
 	}
 
 	reg := registeredFn{
-		fn:      wrappedFn,
-		reqType: reqInstance,
-		resType: resInstance,
+		fn: wrappedFn,
 	}
 	for _, o := range opts {
 		o(&reg)
@@ -134,14 +128,6 @@ func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, 
 	}
 
 	c.registry[reg.name] = reg
-	c.types[reg.name] = reqInstance
-	c.types[reg.name+"_response"] = resInstance
-}
-
-// RegisterProto registers a proto file descriptor with the worker's proto registry.
-// This allows Starlark scripts to access the proto definitions.
-func (c *Client[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) {
-	c.protoRegistry.customFiles[fileDescriptor.Path()] = fileDescriptor
 }
 
 // validateScript performs validation on the Starlark script.
@@ -182,7 +168,7 @@ func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]
 
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
-func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
+func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output any) error {
 	resumeEvent := events.NewResumeEvent(cid, output)
 	_, err := c.store.RecordEvent(ctx, runID, 0, resumeEvent)
 	return err

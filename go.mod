@@ -8,7 +8,6 @@ require (
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/stretchr/testify v1.10.0
 	go.starlark.net v0.0.0-20250623223156-8bf495bf4e9a
-	google.golang.org/protobuf v1.36.6
 )
 
 require (

@@ -2,6 +2,7 @@ package starflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -9,15 +10,10 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/emcfarlane/starlarkproto"
-	"go.starlark.net/lib/json"
+	starjson "go.starlark.net/lib/json"
 	"go.starlark.net/lib/math"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/dynoinc/starflow/events"
 )
@@ -143,18 +139,46 @@ func makeSleepBuiltin(t *trace) *starlark.Builtin {
 			return nil, fmt.Errorf("first argument must be context")
 		}
 
-		// duration must be a google.protobuf.Duration proto message
-		durVal, ok := durationVal.(*starlarkproto.Message)
-		if !ok {
-			return nil, fmt.Errorf("duration must be google.protobuf.Duration proto message")
+		// duration can be a number (seconds) or a dict with seconds/nanos
+		var sleepDuration time.Duration
+		switch v := durationVal.(type) {
+		case starlark.Int:
+			seconds, ok := v.Int64()
+			if !ok {
+				return nil, fmt.Errorf("duration too large")
+			}
+			sleepDuration = time.Duration(seconds) * time.Second
+		case starlark.Float:
+			sleepDuration = time.Duration(float64(v) * float64(time.Second))
+		case *starlark.Dict:
+			// Handle dict with seconds/nanos like {"seconds": 1, "nanos": 500000000}
+			secondsVal, found, err := v.Get(starlark.String("seconds"))
+			if err != nil {
+				return nil, err
+			}
+			var seconds int64
+			if found {
+				if secInt, ok := secondsVal.(starlark.Int); ok {
+					seconds, _ = secInt.Int64()
+				}
+			}
+
+			nanosVal, found, err := v.Get(starlark.String("nanos"))
+			if err != nil {
+				return nil, err
+			}
+			var nanos int64
+			if found {
+				if nanoInt, ok := nanosVal.(starlark.Int); ok {
+					nanos, _ = nanoInt.Int64()
+				}
+			}
+
+			sleepDuration = time.Duration(seconds)*time.Second + time.Duration(nanos)*time.Nanosecond
+		default:
+			return nil, fmt.Errorf("duration must be number or dict")
 		}
 
-		durMsg, ok := durVal.ProtoReflect().Interface().(*durationpb.Duration)
-		if !ok {
-			return nil, fmt.Errorf("duration must be google.protobuf.Duration")
-		}
-
-		sleepDuration := durMsg.AsDuration()
 		if sleepEvent, ok := popEvent[events.SleepEvent](t); ok {
 			sleepDuration = time.Until(sleepEvent.WakeupAt())
 		} else {
@@ -197,9 +221,8 @@ func makeTimeNowBuiltin(t *trace) *starlark.Builtin {
 			}
 		}
 
-		// Convert to google.protobuf.Timestamp
-		ts := timestamppb.New(timestamp)
-		return starlarkproto.MakeMessage(ts), nil
+		// Return timestamp as ISO string
+		return starlark.String(timestamp.Format(time.RFC3339Nano)), nil
 	})
 }
 
@@ -242,7 +265,7 @@ func makeRandIntBuiltin(t *trace) *starlark.Builtin {
 	})
 }
 
-func runThread[Input proto.Message, Output proto.Message](
+func runThread[Input any, Output any](
 	ctx context.Context,
 	c *Client[Input, Output],
 	runID string,
@@ -261,12 +284,6 @@ func runThread[Input proto.Message, Output proto.Message](
 		Name:  fmt.Sprintf("run-%s", runID),
 		Print: func(_ *starlark.Thread, msg string) { fmt.Println(msg) },
 		Load: func(thread *starlark.Thread, module string) (starlark.StringDict, error) {
-			if module == "proto" {
-				protoModule := starlarkproto.NewModule(c.protoRegistry)
-				return starlark.StringDict{
-					"proto": protoModule,
-				}, nil
-			}
 			if module == "time" {
 				members := make(starlark.StringDict)
 				members["sleep"] = makeSleepBuiltin(t)
@@ -282,7 +299,7 @@ func runThread[Input proto.Message, Output proto.Message](
 				return math.Module.Members, nil
 			}
 			if module == "json" {
-				return json.Module.Members, nil
+				return starjson.Module.Members, nil
 			}
 
 			return nil, fmt.Errorf("module %q not found", module)
@@ -309,17 +326,17 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("main must be a function")
 	}
 
-	// Create starlark context value that can be passed to main
+	// Create starlark context and convert input to Starlark value
 	ctxWithRunID := WithRunID(ctx, runID)
 	starlarkCtx := &starlarkContext{ctx: ctxWithRunID}
-	starlarkInput := starlarkproto.MakeMessage(input)
 
-	inputAny, err := anypb.New(input)
+	starlarkInput, err := jsonToStarlark(input)
 	if err != nil {
-		return zero, fmt.Errorf("failed to marshal input: %w", err)
+		return zero, fmt.Errorf("failed to convert input to starlark: %w", err)
 	}
 
-	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(runID, inputAny)); err != nil {
+	// Record start event with input
+	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(runID, input)); err != nil {
 		return zero, fmt.Errorf("failed to record start event: %w", err)
 	}
 
@@ -338,25 +355,132 @@ func runThread[Input proto.Message, Output proto.Message](
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
 
+	// Convert output back to Go type
 	var output Output
 	if starlarkOutput != starlark.None {
-		pm, ok := starlarkOutput.(*starlarkproto.Message)
-		if !ok {
-			return zero, fmt.Errorf("main return value is not a proto message, got %s", starlarkOutput.Type())
+		outputData, err := starlarkToJSON(starlarkOutput)
+		if err != nil {
+			return zero, fmt.Errorf("failed to convert output from starlark: %w", err)
 		}
-		output = pm.ProtoReflect().Interface().(Output)
+
+		// Convert via JSON marshaling
+		outputBytes, err := json.Marshal(outputData)
+		if err != nil {
+			return zero, fmt.Errorf("failed to marshal output: %w", err)
+		}
+
+		if err := json.Unmarshal(outputBytes, &output); err != nil {
+			return zero, fmt.Errorf("failed to unmarshal output: %w", err)
+		}
 	}
 
-	outputAny, err := anypb.New(output)
-	if err != nil {
-		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
-	}
-
-	if err := recordEvent(ctxWithRunID, t, events.NewFinishEvent(outputAny, nil)); err != nil {
+	// Record finish event
+	outputData, _ := starlarkToJSON(starlarkOutput)
+	if err := recordEvent(ctxWithRunID, t, events.NewFinishEvent(outputData, nil)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
 	return output, nil
+}
+
+// Helper functions for Starlark <-> JSON conversion
+func jsonToStarlark(data interface{}) (starlark.Value, error) {
+	switch v := data.(type) {
+	case nil:
+		return starlark.None, nil
+	case bool:
+		return starlark.Bool(v), nil
+	case int:
+		return starlark.MakeInt(v), nil
+	case int64:
+		return starlark.MakeInt64(v), nil
+	case float64:
+		return starlark.Float(v), nil
+	case string:
+		return starlark.String(v), nil
+	case []interface{}:
+		list := make([]starlark.Value, len(v))
+		for i, item := range v {
+			val, err := jsonToStarlark(item)
+			if err != nil {
+				return nil, err
+			}
+			list[i] = val
+		}
+		return starlark.NewList(list), nil
+	case map[string]interface{}:
+		dict := starlark.NewDict(len(v))
+		for key, value := range v {
+			val, err := jsonToStarlark(value)
+			if err != nil {
+				return nil, err
+			}
+			dict.SetKey(starlark.String(key), val)
+		}
+		return dict, nil
+	default:
+		// Try to convert via JSON for other types
+		jsonBytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, fmt.Errorf("unsupported type %T: %w", data, err)
+		}
+
+		var jsonData interface{}
+		if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
+			return nil, err
+		}
+
+		return jsonToStarlark(jsonData)
+	}
+}
+
+func starlarkToJSON(value starlark.Value) (interface{}, error) {
+	switch v := value.(type) {
+	case starlark.NoneType:
+		return nil, nil
+	case starlark.Bool:
+		return bool(v), nil
+	case starlark.Int:
+		i, ok := v.Int64()
+		if ok {
+			return i, nil
+		}
+		return v.String(), nil // fallback for big integers
+	case starlark.Float:
+		return float64(v), nil
+	case starlark.String:
+		return string(v), nil
+	case *starlark.List:
+		result := make([]interface{}, v.Len())
+		for i := 0; i < v.Len(); i++ {
+			val, err := starlarkToJSON(v.Index(i))
+			if err != nil {
+				return nil, err
+			}
+			result[i] = val
+		}
+		return result, nil
+	case *starlark.Dict:
+		result := make(map[string]interface{})
+		for _, k := range v.Keys() {
+			key, ok := k.(starlark.String)
+			if !ok {
+				return nil, fmt.Errorf("dict key must be string, got %s", k.Type())
+			}
+			val, _, err := v.Get(k)
+			if err != nil {
+				return nil, err
+			}
+			jsonVal, err := starlarkToJSON(val)
+			if err != nil {
+				return nil, err
+			}
+			result[string(key)] = jsonVal
+		}
+		return result, nil
+	default:
+		return nil, fmt.Errorf("unsupported starlark type: %s", v.Type())
+	}
 }
 
 // starlarkContext wraps Go context for use in Starlark
@@ -370,7 +494,7 @@ func (sc *starlarkContext) Freeze()               {}
 func (sc *starlarkContext) Truth() starlark.Bool  { return starlark.True }
 func (sc *starlarkContext) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: context") }
 
-// wrapFn wraps a Go function to be callable from Starlark.
+// wrapFn wraps a Go function to be callable from Starlark with JSON
 func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 	return starlark.NewBuiltin(regFn.name, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
@@ -379,66 +503,62 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 			return starlark.None, err
 		}
 
-		// Extract context from starlark value
 		starlarkCtx, ok := ctxVal.(*starlarkContext)
 		if !ok {
 			return starlark.None, fmt.Errorf("first argument must be context, got %s", ctxVal.Type())
 		}
 
-		req := proto.Clone(regFn.reqType)
+		// Convert Starlark value to any
+		var req any
 		if reqVal != starlark.None {
-			pm, ok := reqVal.(*starlarkproto.Message)
-			if !ok {
-				return starlark.None, fmt.Errorf("failed to convert starlark value to proto: expected proto message, got %s", reqVal.Type())
+			var err error
+			req, err = starlarkToJSON(reqVal)
+			if err != nil {
+				return starlark.None, fmt.Errorf("failed to convert request: %w", err)
 			}
-			proto.Merge(req, pm.ProtoReflect().Interface())
 		}
 
-		reqAny, err := anypb.New(req)
-		if err != nil {
-			return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
-		}
-
-		if err := recordEvent(starlarkCtx.ctx, t, events.NewCallEvent(regFn.name, reqAny)); err != nil {
+		// Record call event
+		if err := recordEvent(starlarkCtx.ctx, t, events.NewCallEvent(regFn.name, req)); err != nil {
 			return starlark.None, fmt.Errorf("failed to record call event: %w", err)
 		}
 
+		// Check for replay
 		if returnEvent, ok := popEvent[events.ReturnEvent](t); ok {
 			if _, retErr := returnEvent.Output(); retErr != nil {
 				return starlark.None, retErr
 			}
 
-			if outputAny, _ := returnEvent.Output(); outputAny != nil {
-				respProto := proto.Clone(regFn.resType)
-				if err := outputAny.UnmarshalTo(respProto); err != nil {
-					return starlark.None, fmt.Errorf("failed to unmarshal return event output: %w", err)
+			if output, _ := returnEvent.Output(); output != nil {
+				starlarkRes, err := jsonToStarlark(output)
+				if err != nil {
+					return starlark.None, fmt.Errorf("failed to convert return event output: %w", err)
 				}
-
-				return starlarkproto.MakeMessage(respProto), nil
+				return starlarkRes, nil
 			}
 		}
 
+		// Check for yield/resume
 		if yieldEvent, ok := popEvent[events.YieldEvent](t); ok {
 			resumeEvent, ok := popEvent[events.ResumeEvent](t)
 			if !ok {
-				// still waiting for the signal to resume. ideally we should have not tried to resume the run
-				// but anyways, life happens.
+				// still waiting for the signal to resume
 				return starlark.None, YieldErrorFrom(yieldEvent)
 			}
 
 			if resumeEvent.Output() != nil {
-				respProto := proto.Clone(regFn.resType)
-				if err := resumeEvent.Output().UnmarshalTo(respProto); err != nil {
-					return starlark.None, fmt.Errorf("failed to unmarshal resume event output: %w", err)
+				starlarkRes, err := jsonToStarlark(resumeEvent.Output())
+				if err != nil {
+					return starlark.None, fmt.Errorf("failed to convert resume event output: %w", err)
 				}
-
-				return starlarkproto.MakeMessage(respProto), nil
+				return starlarkRes, nil
 			}
 
 			return starlark.None, nil
 		}
 
-		var resp proto.Message
+		// Execute function
+		var resp any
 		callFunc := func() (err error) {
 			defer func() {
 				if r := recover(); r != nil {
@@ -466,6 +586,7 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 			callErr = callFunc()
 		}
 
+		// Record return event
 		var event events.EventMetadata
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
@@ -474,12 +595,7 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 		} else if callErr != nil {
 			event = events.NewReturnEvent(nil, callErr)
 		} else {
-			outputAny, err := anypb.New(resp)
-			if err != nil {
-				return starlark.None, fmt.Errorf("failed to marshal response: %w", err)
-			}
-
-			event = events.NewReturnEvent(outputAny, nil)
+			event = events.NewReturnEvent(resp, nil)
 		}
 
 		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {
@@ -490,6 +606,12 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 			return starlark.None, callErr
 		}
 
-		return starlarkproto.MakeMessage(resp), nil
+		// Convert response to Starlark
+		starlarkRes, err := jsonToStarlark(resp)
+		if err != nil {
+			return starlark.None, fmt.Errorf("failed to convert response to starlark: %w", err)
+		}
+
+		return starlarkRes, nil
 	})
 }

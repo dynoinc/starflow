@@ -8,44 +8,63 @@ import (
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/dynoinc/starflow"
 	"github.com/dynoinc/starflow/events"
 	starflowsuite "github.com/dynoinc/starflow/suite"
-	testpb "github.com/dynoinc/starflow/suite/proto"
 )
+
+// Test data structures for JSON-based tests
+type PingRequest struct {
+	Message string `json:"message"`
+}
+
+type PingResponse struct {
+	Message string `json:"message"`
+}
+
+type ComplexRequest struct {
+	Text   string            `json:"text"`
+	Number int               `json:"number"`
+	Flag   bool              `json:"flag"`
+	Tags   []string          `json:"tags"`
+	Meta   map[string]string `json:"meta"`
+}
+
+type ComplexResponse struct {
+	Result string                 `json:"result"`
+	Data   map[string]interface{} `json:"data"`
+}
 
 // WorkflowTestSuite provides a clean testing environment for starflow workflows.
 type WorkflowTestSuite struct {
 	suite.Suite
 	store  starflow.Store
-	client *starflow.Client[*testpb.PingRequest, *testpb.PingResponse]
+	client *starflow.Client[PingRequest, PingResponse]
 }
 
 // SetupTest initializes a fresh client for each test.
 func (s *WorkflowTestSuite) SetupTest() {
 	s.store = starflow.NewInMemoryStore()
-	s.client = starflow.NewClient[*testpb.PingRequest, *testpb.PingResponse](s.store)
-	s.client.RegisterProto(testpb.File_suite_proto_ping_proto)
+	s.client = starflow.NewClient[PingRequest, PingResponse](s.store)
 
 	// Register a standard ping function for tests
 	starflow.RegisterFunc(s.client, s.pingPong, starflow.WithName("test.PingPong"))
 }
 
 // Helper: pingPong is a standard test function
-func (s *WorkflowTestSuite) pingPong(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-	return &testpb.PingResponse{Message: "pong: " + req.Message}, nil
+func (s *WorkflowTestSuite) pingPong(ctx context.Context, req PingRequest) (PingResponse, error) {
+	return PingResponse{Message: "pong: " + req.Message}, nil
 }
 
 // Helper: runScript executes a workflow script and returns the result
-func (s *WorkflowTestSuite) runScript(script string, input *testpb.PingRequest) (*testpb.PingResponse, error) {
+func (s *WorkflowTestSuite) runScript(script string, input PingRequest) (PingResponse, error) {
 	runID := fmt.Sprintf("test-run-%d", time.Now().UnixNano())
 	return s.client.Run(context.Background(), runID, []byte(script), input)
 }
 
 // Helper: mustRunScript executes a script and requires it to succeed
-func (s *WorkflowTestSuite) mustRunScript(script string, input *testpb.PingRequest) *testpb.PingResponse {
+func (s *WorkflowTestSuite) mustRunScript(script string, input PingRequest) PingResponse {
 	output, err := s.runScript(script, input)
 	s.Require().NoError(err)
 	return output
@@ -73,110 +92,238 @@ func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...events.E
 // Helper: registerFunction adds a function to the client
 func (s *WorkflowTestSuite) registerFunction(name string, fn interface{}) {
 	switch f := fn.(type) {
-	case func(context.Context, *testpb.PingRequest) (*testpb.PingResponse, error):
+	case func(context.Context, PingRequest) (PingResponse, error):
 		starflow.RegisterFunc(s.client, f, starflow.WithName(name))
 	default:
 		s.T().Fatalf("Unsupported function type: %T", fn)
 	}
 }
 
-// Basic workflow execution
+// Basic workflow execution with JSON
 func (s *WorkflowTestSuite) TestBasicWorkflowExecution() {
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return test.PingPong(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return test.PingPong(ctx=ctx, req={"message": input["message"]})
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "hello"})
+	output := s.mustRunScript(script, PingRequest{Message: "hello"})
 	s.Equal("pong: hello", output.Message)
 }
 
-// Function registration with custom names
+// Test function registration with custom names
 func (s *WorkflowTestSuite) TestFunctionRegistration() {
-	customFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		return &testpb.PingResponse{Message: "custom: " + req.Message}, nil
+	customFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		return PingResponse{Message: "custom: " + req.Message}, nil
 	}
 	s.registerFunction("custom.Function", customFn)
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return custom.Function(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return custom.Function(ctx=ctx, req={"message": input["message"]})
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "test"})
+	output := s.mustRunScript(script, PingRequest{Message: "test"})
 	s.Equal("custom: test", output.Message)
 }
 
-// Protocol buffer integration
-func (s *WorkflowTestSuite) TestProtocolBufferIntegration() {
+// Test JSON integration with various data types
+func (s *WorkflowTestSuite) TestJSONDataTypes() {
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    # Test creating protobuf messages in Starlark
-    request = ping_proto.PingRequest(message="constructed in starlark")
-    return test.PingPong(ctx=ctx, req=request)
+    # Test various JSON data types
+    data = {
+        "string": "hello",
+        "number": 42,
+        "float": 3.14,
+        "bool": True,
+        "null": None,
+        "array": [1, 2, 3],
+        "object": {"nested": "value"}
+    }
+    
+    # Use original input message
+    data["original"] = input["message"]
+    
+    return {"message": "data processed", "data": data}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "ignored"})
-	s.Equal("pong: constructed in starlark", output.Message)
+	output := s.mustRunScript(script, PingRequest{Message: "test"})
+	s.Equal("data processed", output.Message)
 }
 
-// Well-known protobuf types
-func (s *WorkflowTestSuite) TestWellKnownTypes() {
-	script := `
-load("proto", "proto")
+// Test with nil/None values
+func (s *WorkflowTestSuite) TestNilAndNoneHandling() {
+	nilTestFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		if req.Message == "" {
+			return PingResponse{}, nil // Return zero value for empty message (nil input)
+		}
+		return PingResponse{Message: "not nil: " + req.Message}, nil
+	}
+	s.registerFunction("test.NilTest", nilTestFn)
 
+	script := `
 def main(ctx, input):
-    wrappers_proto = proto.file("google/protobuf/wrappers.proto")
-    ping_proto = proto.file("suite/proto/ping.proto")
-    
-    # Use StringValue wrapper
-    string_val = wrappers_proto.StringValue(value="wrapped: " + input.message)
-    return ping_proto.PingResponse(message=string_val.value)
+    if input["message"] == "test_nil":
+        # Test calling with nil/None
+        result = test.NilTest(ctx=ctx, req=None)
+        return {"message": "nil result: " + (result["message"] if result["message"] else "empty")}
+    else:
+        result = test.NilTest(ctx=ctx, req={"message": input["message"]})
+        return {"message": result["message"]}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "test"})
-	s.Equal("wrapped: test", output.Message)
+
+	// Test with None
+	output := s.mustRunScript(script, PingRequest{Message: "test_nil"})
+	s.Equal("nil result: empty", output.Message)
+
+	// Test with actual value
+	output = s.mustRunScript(script, PingRequest{Message: "hello"})
+	s.Equal("not nil: hello", output.Message)
+}
+
+// Test with basic primitive types
+func (s *WorkflowTestSuite) TestBasicTypes() {
+	// Test function that handles different types
+	typeTestFn := func(ctx context.Context, req interface{}) (interface{}, error) {
+		switch v := req.(type) {
+		case string:
+			return "string: " + v, nil
+		case float64: // JSON numbers are float64
+			return fmt.Sprintf("number: %.0f", v), nil
+		case bool:
+			return fmt.Sprintf("bool: %t", v), nil
+		case map[string]interface{}:
+			if msg, ok := v["message"].(string); ok {
+				return map[string]interface{}{"result": "object: " + msg}, nil
+			}
+			return map[string]interface{}{"result": "object: unknown"}, nil
+		case []interface{}:
+			return fmt.Sprintf("array: %d items", len(v)), nil
+		default:
+			return "unknown type", nil
+		}
+	}
+
+	client := starflow.NewClient[interface{}, interface{}](s.store)
+	starflow.RegisterFunc(client, typeTestFn, starflow.WithName("test.TypeTest"))
+
+	// Test string
+	script := `
+def main(ctx, input):
+    return test.TypeTest(ctx=ctx, req="hello world")
+`
+	result, err := client.Run(context.Background(), "test-string", []byte(script), "input")
+	s.Require().NoError(err)
+	s.Equal("string: hello world", result)
+
+	// Test number
+	script = `
+def main(ctx, input):
+    return test.TypeTest(ctx=ctx, req=42)
+`
+	result, err = client.Run(context.Background(), "test-number", []byte(script), 0)
+	s.Require().NoError(err)
+	s.Equal("number: 42", result)
+
+	// Test boolean
+	script = `
+def main(ctx, input):
+    return test.TypeTest(ctx=ctx, req=True)
+`
+	result, err = client.Run(context.Background(), "test-bool", []byte(script), false)
+	s.Require().NoError(err)
+	s.Equal("bool: true", result)
+
+	// Test array
+	script = `
+def main(ctx, input):
+    return test.TypeTest(ctx=ctx, req=[1, 2, 3, 4, 5])
+`
+	result, err = client.Run(context.Background(), "test-array", []byte(script), []int{})
+	s.Require().NoError(err)
+	s.Equal("array: 5 items", result)
+}
+
+// Test complex nested structures
+func (s *WorkflowTestSuite) TestComplexStructures() {
+	complexFn := func(ctx context.Context, req ComplexRequest) (ComplexResponse, error) {
+		return ComplexResponse{
+			Result: fmt.Sprintf("processed: %s (%d)", req.Text, req.Number),
+			Data: map[string]interface{}{
+				"flag":     req.Flag,
+				"tagCount": len(req.Tags),
+				"meta":     req.Meta,
+			},
+		}, nil
+	}
+
+	client := starflow.NewClient[ComplexRequest, ComplexResponse](s.store)
+	starflow.RegisterFunc(client, complexFn, starflow.WithName("test.Complex"))
+
+	script := `
+def main(ctx, input):
+    request = {
+        "text": input["text"],
+        "number": input["number"],
+        "flag": input["flag"],
+        "tags": input["tags"],
+        "meta": input["meta"]
+    }
+    
+    result = test.Complex(ctx=ctx, req=request)
+    
+    # Return modified response
+    result["data"]["processed"] = True
+    return result
+`
+
+	input := ComplexRequest{
+		Text:   "hello world",
+		Number: 42,
+		Flag:   true,
+		Tags:   []string{"tag1", "tag2", "tag3"},
+		Meta:   map[string]string{"key1": "value1", "key2": "value2"},
+	}
+
+	output, err := client.Run(context.Background(), "test-complex", []byte(script), input)
+	s.Require().NoError(err)
+
+	s.Equal("processed: hello world (42)", output.Result)
+	s.Equal(true, output.Data["flag"])
+	s.Equal(float64(3), output.Data["tagCount"]) // JSON numbers are float64
+	s.Equal(true, output.Data["processed"])
+
+	meta, ok := output.Data["meta"].(map[string]interface{})
+	s.Require().True(ok)
+	s.Equal("value1", meta["key1"])
+	s.Equal("value2", meta["key2"])
 }
 
 // Error handling - function errors
 func (s *WorkflowTestSuite) TestFunctionErrorHandling() {
-	failingFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		return nil, fmt.Errorf("intentional failure: %s", req.Message)
+	failingFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		return PingResponse{}, fmt.Errorf("intentional failure: %s", req.Message)
 	}
 	s.registerFunction("test.FailingFunction", failingFn)
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return test.FailingFunction(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return test.FailingFunction(ctx=ctx, req={"message": input["message"]})
 `
-	_, err := s.runScript(script, &testpb.PingRequest{Message: "fail"})
+	_, err := s.runScript(script, PingRequest{Message: "fail"})
 	s.Require().Error(err)
 	s.Contains(err.Error(), "intentional failure: fail")
 }
 
 // Error handling - panic recovery
 func (s *WorkflowTestSuite) TestPanicRecovery() {
-	panicFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+	panicFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
 		panic("test panic")
 	}
 	s.registerFunction("test.PanicFunction", panicFn)
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return test.PanicFunction(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return test.PanicFunction(ctx=ctx, req={"message": input["message"]})
 `
-	_, err := s.runScript(script, &testpb.PingRequest{Message: "panic"})
+	_, err := s.runScript(script, PingRequest{Message: "panic"})
 	s.Require().Error(err)
 	s.Contains(err.Error(), "panic")
 }
@@ -184,12 +331,10 @@ def main(ctx, input):
 // Script validation - syntax errors
 func (s *WorkflowTestSuite) TestScriptSyntaxValidation() {
 	invalidScript := `
-load("proto", "proto")
-
 def main(ctx, input)  # Missing colon
-    return proto.file("suite/proto/ping.proto").PingResponse(message="test")
+    return {"message": "test"}
 `
-	_, err := s.runScript(invalidScript, &testpb.PingRequest{Message: "test"})
+	_, err := s.runScript(invalidScript, PingRequest{Message: "test"})
 	s.Require().Error(err)
 	s.Contains(err.Error(), "syntax error")
 }
@@ -197,12 +342,10 @@ def main(ctx, input)  # Missing colon
 // Script validation - missing main function
 func (s *WorkflowTestSuite) TestScriptMainFunctionValidation() {
 	scriptWithoutMain := `
-load("proto", "proto")
-
 def helper_function(ctx, input):
-    return proto.file("suite/proto/ping.proto").PingResponse(message="test")
+    return {"message": "test"}
 `
-	_, err := s.runScript(scriptWithoutMain, &testpb.PingRequest{Message: "test"})
+	_, err := s.runScript(scriptWithoutMain, PingRequest{Message: "test"})
 	s.Require().Error(err)
 	s.Contains(err.Error(), "main function")
 }
@@ -210,25 +353,22 @@ def helper_function(ctx, input):
 // Retry policy functionality
 func (s *WorkflowTestSuite) TestRetryPolicy() {
 	attempts := 0
-	retryFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+	retryFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
 		attempts++
 		if attempts < 3 {
-			return nil, fmt.Errorf("transient error")
+			return PingResponse{}, fmt.Errorf("transient error")
 		}
-		return &testpb.PingResponse{Message: "success after retries"}, nil
+		return PingResponse{Message: "success after retries"}, nil
 	}
 
 	policy := backoff.WithMaxRetries(backoff.NewConstantBackOff(1*time.Millisecond), 3)
 	starflow.RegisterFunc(s.client, retryFn, starflow.WithName("test.RetryFunction"), starflow.WithRetryPolicy(policy))
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return test.RetryFunction(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return test.RetryFunction(ctx=ctx, req={"message": input["message"]})
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "retry"})
+	output := s.mustRunScript(script, PingRequest{Message: "retry"})
 	s.Equal("success after retries", output.Message)
 	s.Equal(3, attempts, "Expected exactly 3 attempts")
 }
@@ -236,119 +376,115 @@ def main(ctx, input):
 // Starlark math module integration
 func (s *WorkflowTestSuite) TestStarlarkMathModule() {
 	script := `
-load("proto", "proto")
 load("math", "sqrt")
 
 def main(ctx, input):
     result = sqrt(16)
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return ping_proto.PingResponse(message=str(result))
+    return {"message": str(result)}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "math"})
+	output := s.mustRunScript(script, PingRequest{Message: "math"})
 	s.Equal("4.0", output.Message)
 }
 
 // Deterministic time function
 func (s *WorkflowTestSuite) TestDeterministicTimeFunction() {
 	script := `
-load("proto", "proto")  
 load("time", "now")
 
 def main(ctx, input):
     timestamp = now(ctx=ctx)
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return ping_proto.PingResponse(message="timestamp: " + str(timestamp))
+    return {"message": "timestamp: " + timestamp}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "time"})
+	output := s.mustRunScript(script, PingRequest{Message: "time"})
 	s.Contains(output.Message, "timestamp:")
 }
 
 // Deterministic random function
 func (s *WorkflowTestSuite) TestDeterministicRandomFunction() {
 	script := `
-load("proto", "proto")
 load("rand", "int")
 
 def main(ctx, input):
     random_num = int(ctx=ctx, max=100)
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return ping_proto.PingResponse(message="random: " + str(random_num))
+    return {"message": "random: " + str(random_num)}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "random"})
+	output := s.mustRunScript(script, PingRequest{Message: "random"})
 	s.Contains(output.Message, "random:")
 }
 
-// Sleep function with duration
+// Sleep function with duration (using dict format)
 func (s *WorkflowTestSuite) TestSleepFunction() {
 	script := `
-load("proto", "proto")
 load("time", "sleep")
 
 def main(ctx, input):
-    duration_proto = proto.file("google/protobuf/duration.proto")
-    sleep(ctx=ctx, duration=duration_proto.Duration(seconds=0, nanos=1000000))  # 1ms
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return ping_proto.PingResponse(message="slept")
+    sleep(ctx=ctx, duration={"seconds": 0, "nanos": 1000000})  # 1ms
+    return {"message": "slept"}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "sleep"})
+	output := s.mustRunScript(script, PingRequest{Message: "sleep"})
+	s.Equal("slept", output.Message)
+}
+
+// Sleep function with number duration (seconds)
+func (s *WorkflowTestSuite) TestSleepFunctionWithNumber() {
+	script := `
+load("time", "sleep")
+
+def main(ctx, input):
+    sleep(ctx=ctx, duration=0.001)  # 1ms as float
+    return {"message": "slept"}
+`
+	output := s.mustRunScript(script, PingRequest{Message: "sleep"})
 	s.Equal("slept", output.Message)
 }
 
 // Multiple function calls in sequence
 func (s *WorkflowTestSuite) TestMultipleFunctionCalls() {
-	firstFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		return &testpb.PingResponse{Message: "first: " + req.Message}, nil
+	firstFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		return PingResponse{Message: "first: " + req.Message}, nil
 	}
-	secondFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
-		return &testpb.PingResponse{Message: "second: " + req.Message}, nil
+	secondFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		return PingResponse{Message: "second: " + req.Message}, nil
 	}
 
 	s.registerFunction("test.FirstFunction", firstFn)
 	s.registerFunction("test.SecondFunction", secondFn)
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
+    first_result = test.FirstFunction(ctx=ctx, req={"message": input["message"]})
+    second_result = test.SecondFunction(ctx=ctx, req={"message": first_result["message"]})
     
-    first_result = test.FirstFunction(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
-    second_result = test.SecondFunction(ctx=ctx, req=ping_proto.PingRequest(message=first_result.message))
-    
-    return ping_proto.PingResponse(message="final: " + second_result.message)
+    return {"message": "final: " + second_result["message"]}
 `
-	output := s.mustRunScript(script, &testpb.PingRequest{Message: "chained"})
+	output := s.mustRunScript(script, PingRequest{Message: "chained"})
 	s.Equal("final: second: first: chained", output.Message)
 }
 
 // Yield and resume functionality
 func (s *WorkflowTestSuite) TestYieldAndResume() {
 	var capturedRunID, capturedCID string
-	yieldFn := func(ctx context.Context, req *testpb.PingRequest) (*testpb.PingResponse, error) {
+	yieldFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
 		var err error
 		capturedRunID, capturedCID, err = starflow.NewYieldError(ctx)
-		return nil, err
+		return PingResponse{}, err
 	}
 
 	// Create separate client for this test to manage yield/resume
 	store := starflow.NewInMemoryStore()
-	client := starflow.NewClient[*testpb.PingRequest, *testpb.PingResponse](store)
-	client.RegisterProto(testpb.File_suite_proto_ping_proto)
+	client := starflow.NewClient[PingRequest, PingResponse](store)
 	starflow.RegisterFunc(client, yieldFn, starflow.WithName("test.YieldFunction"))
 
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    test.YieldFunction(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
-    return ping_proto.PingResponse(message="resumed")
+    test.YieldFunction(ctx=ctx, req={"message": input["message"]})
+    return {"message": "resumed"}
 `
 
 	runID := "yield-test-run"
 
 	// First run should yield (and return YieldError)
-	_, err := client.Run(context.Background(), runID, []byte(script), &testpb.PingRequest{Message: "test"})
+	_, err := client.Run(context.Background(), runID, []byte(script), PingRequest{Message: "test"})
 	s.Require().Error(err)
 
 	// Check that it's a yield error
@@ -356,14 +492,12 @@ def main(ctx, input):
 	s.Require().ErrorAs(err, &yieldErr)
 
 	// Resume with signal
-	resumeOutput, err := anypb.New(&testpb.PingResponse{Message: "signal_value"})
-	s.Require().NoError(err)
-
+	resumeOutput := PingResponse{Message: "signal_value"}
 	err = client.Signal(context.Background(), capturedRunID, capturedCID, resumeOutput)
 	s.Require().NoError(err)
 
 	// Now run again - it should complete
-	output, err := client.Run(context.Background(), runID, []byte(script), &testpb.PingRequest{Message: "test"})
+	output, err := client.Run(context.Background(), runID, []byte(script), PingRequest{Message: "test"})
 	s.Require().NoError(err)
 	s.Equal("resumed", output.Message)
 }
@@ -371,14 +505,11 @@ def main(ctx, input):
 // Event recording and retrieval
 func (s *WorkflowTestSuite) TestEventRecording() {
 	script := `
-load("proto", "proto")
-
 def main(ctx, input):
-    ping_proto = proto.file("suite/proto/ping.proto")
-    return test.PingPong(ctx=ctx, req=ping_proto.PingRequest(message=input.message))
+    return test.PingPong(ctx=ctx, req={"message": input["message"]})
 `
 	runID := "event-test-run"
-	_, err := s.client.Run(context.Background(), runID, []byte(script), &testpb.PingRequest{Message: "events"})
+	_, err := s.client.Run(context.Background(), runID, []byte(script), PingRequest{Message: "events"})
 	s.Require().NoError(err)
 
 	// Verify basic event sequence
@@ -388,6 +519,38 @@ def main(ctx, input):
 		events.EventTypeReturn,
 		events.EventTypeFinish,
 	)
+}
+
+// Test JSON encoding/decoding in scripts
+func (s *WorkflowTestSuite) TestJSONEncodingDecoding() {
+	script := `
+load("json", "encode", "decode")
+
+def main(ctx, input):
+    # Create complex data structure
+    data = {
+        "input": input,
+        "processing": {
+            "step1": "encode to JSON",
+            "step2": "decode from JSON"
+        },
+        "numbers": [1, 2, 3.14, 42],
+        "flags": [True, False, None]
+    }
+    
+    # Encode to JSON string
+    json_str = encode(data)
+    
+    # Decode back from JSON  
+    decoded = decode(json_str)
+    
+    # Verify round-trip works
+    return {
+        "message": "JSON test: " + decoded["input"]["message"]
+    }
+`
+	output := s.mustRunScript(script, PingRequest{Message: "json-test"})
+	s.Equal("JSON test: json-test", output.Message)
 }
 
 // In order for 'go test' to run this suite, we need to create a normal test function that calls suite.Run
