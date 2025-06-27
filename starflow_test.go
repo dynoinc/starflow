@@ -10,7 +10,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/dynoinc/starflow"
-	"github.com/dynoinc/starflow/events"
 	starflowsuite "github.com/dynoinc/starflow/suite"
 )
 
@@ -71,16 +70,16 @@ func (s *WorkflowTestSuite) mustRunScript(script string, input PingRequest) Ping
 }
 
 // Helper: getEvents retrieves events for a run (returns empty slice if not found)
-func (s *WorkflowTestSuite) getEvents(runID string) []*events.Event {
+func (s *WorkflowTestSuite) getEvents(runID string) []*starflow.Event {
 	eventList, err := s.client.GetEvents(context.Background(), runID)
 	if err != nil {
-		return []*events.Event{} // Return empty slice for non-existent runs
+		return []*starflow.Event{} // Return empty slice for non-existent runs
 	}
 	return eventList
 }
 
 // Helper: expectEvents verifies event sequence
-func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...events.EventType) {
+func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...starflow.EventType) {
 	actualEvents := s.getEvents(runID)
 	s.Require().Len(actualEvents, len(expectedTypes), "Event count mismatch")
 
@@ -547,10 +546,10 @@ def main(ctx, input):
 
 	// Verify basic event sequence
 	s.expectEvents(runID,
-		events.EventTypeStart,
-		events.EventTypeCall,
-		events.EventTypeReturn,
-		events.EventTypeFinish,
+		starflow.EventTypeStart,
+		starflow.EventTypeCall,
+		starflow.EventTypeReturn,
+		starflow.EventTypeFinish,
 	)
 }
 
@@ -620,7 +619,7 @@ def main(ctx, input):
 	s.Require().NoError(err)
 	var signalID string
 	for _, ev := range eventsList {
-		if y, ok := ev.Metadata.(events.YieldEvent); ok {
+		if y, ok := ev.Metadata.(starflow.YieldEvent); ok {
 			signalID = y.SignalID()
 		}
 	}

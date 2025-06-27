@@ -1,6 +1,6 @@
 # Starflow
 
-A workflow engine for Go that enables deterministic, resumable, and distributed workflow execution using Starlark scripting.
+A workflow engine for Go that enables deterministic and resumable workflow execution using Starlark scripting.
 
 ## Features
 
@@ -9,14 +9,9 @@ Write workflows in Starlark (Python-like syntax) that are deterministic and can 
 Every execution step is recorded and can be resumed exactly where it left off.
 
 ### Pluggable Backends
-Support for in-memory, DynamoDB, and PostgreSQL storage with easy extensibility for custom backends. 
-Choose the storage solution that fits your deployment environment and scale requirements.
-
-## Architecture
-
-Starflow primarily revolves around **Store**. **Clients** directly interact with store
-to create/query runs. One or more **Worker** in the background pick up workflow runs ready
-to run and execute the logic. 
+Any store that can persist a sequence of events can be used as backend. We provide an in-memory implementation 
+as reference and a suite of conformance tests. Choose the storage solution that fits your deployment environment
+and scale requirements.
 
 ## Installation
 

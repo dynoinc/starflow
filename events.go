@@ -1,4 +1,4 @@
-package events
+package starflow
 
 import (
 	"encoding/json"

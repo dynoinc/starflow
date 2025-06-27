@@ -1,5 +1,5 @@
-// Package starflow provides a workflow engine for Go that enables deterministic,
-// resumable, and distributed workflow execution using Starlark scripting. Every
+// Package starflow provides a workflow engine for Go that enables deterministic
+// and resumable workflow execution using Starlark scripting. Every
 // execution step is recorded and can be resumed exactly where it left off.
 //
 // # Key Features
@@ -7,7 +7,6 @@
 //   - Deterministic & Durable Workflows: Write workflows that are deterministic
 //     and can be replayed from any point with full durability guarantees
 //   - Pluggable Backends: Works with any backend that implements the Store interface
-//   - Distributed Execution: Multiple workers can process workflow runs concurrently
 //   - Resumable Workflows: Workflows can yield and resume based on external signals
 //
 // For more information, see https://github.com/dynoinc/starflow
@@ -26,9 +25,8 @@ import (
 	"go.starlark.net/syntax"
 
 	"github.com/cenkalti/backoff/v4"
-	"github.com/lithammer/shortuuid/v4"
 
-	"github.com/dynoinc/starflow/events"
+	"github.com/lithammer/shortuuid/v4"
 )
 
 type registeredFn struct {
@@ -162,14 +160,14 @@ func (c *Client[Input, Output]) Run(ctx context.Context, runID string, script []
 
 // GetEvents retrieves the execution history of a workflow run.
 // Returns a chronological list of events that occurred during execution.
-func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]*events.Event, error) {
+func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
 	return c.store.GetEvents(ctx, runID)
 }
 
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
 func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output any) error {
-	resumeEvent := events.NewResumeEvent(cid, output)
+	resumeEvent := NewResumeEvent(cid, output)
 	_, err := c.store.RecordEvent(ctx, runID, 0, resumeEvent)
 	return err
 }
@@ -207,11 +205,10 @@ func NewYieldError(ctx context.Context) (string, string, error) {
 	return runID, cid, &YieldError{cid: cid, runID: runID}
 }
 
-func YieldErrorFrom(yieldEvent events.YieldEvent) *YieldError {
+func YieldErrorFrom(yieldEvent YieldEvent) *YieldError {
 	return &YieldError{cid: yieldEvent.SignalID(), runID: yieldEvent.RunID()}
 }
 
 // ErrConcurrentUpdate indicates optimistic concurrency failure.
-// This error is returned when a concurrent update to a run is detected,
-// typically when multiple workers try to claim the same run simultaneously.
+// This error is returned when a concurrent update to a run is detected.
 var ErrConcurrentUpdate = errors.New("concurrent update")

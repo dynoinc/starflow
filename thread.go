@@ -19,19 +19,17 @@ import (
 	startime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
-
-	"github.com/dynoinc/starflow/events"
 )
 
 type trace struct {
 	runID string
 	store Store
 
-	events      []*events.Event
+	events      []*Event
 	nextEventID int
 }
 
-func newTrace(runID string, store Store, events []*events.Event) *trace {
+func newTrace(runID string, store Store, events []*Event) *trace {
 	return &trace{
 		runID: runID,
 		store: store,
@@ -41,7 +39,7 @@ func newTrace(runID string, store Store, events []*events.Event) *trace {
 	}
 }
 
-func popEvent[ET events.EventMetadata](t *trace) (ET, bool) {
+func popEvent[ET EventMetadata](t *trace) (ET, bool) {
 	var zero ET
 	if len(t.events) == 0 {
 		return zero, false
@@ -56,7 +54,7 @@ func popEvent[ET events.EventMetadata](t *trace) (ET, bool) {
 	return nextEvent.Metadata.(ET), true
 }
 
-func recordEvent[ET events.EventMetadata](ctx context.Context, t *trace, event ET) error {
+func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) error {
 	if expected, ok := popEvent[ET](t); ok {
 		if !reflect.DeepEqual(expected, event) {
 			return fmt.Errorf("event mismatch: expected %+v, got %+v", expected, event)
@@ -152,10 +150,10 @@ func makeSleepBuiltin(t *trace) *starlark.Builtin {
 		}
 
 		sleepDuration := time.Duration(duration)
-		if sleepEvent, ok := popEvent[events.SleepEvent](t); ok {
+		if sleepEvent, ok := popEvent[SleepEvent](t); ok {
 			sleepDuration = time.Until(sleepEvent.WakeupAt())
 		} else {
-			if err := recordEvent(starlarkCtx.ctx, t, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
 				return nil, err
 			}
 		}
@@ -184,12 +182,12 @@ func makeTimeNowBuiltin(t *trace) *starlark.Builtin {
 		}
 
 		var timestamp time.Time
-		if timeNowEvent, ok := popEvent[events.TimeNowEvent](t); ok {
+		if timeNowEvent, ok := popEvent[TimeNowEvent](t); ok {
 			timestamp = timeNowEvent.Timestamp()
 		} else {
 			timestamp = time.Now()
 
-			if err := recordEvent(starlarkCtx.ctx, t, events.NewTimeNowEvent(timestamp)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewTimeNowEvent(timestamp)); err != nil {
 				return nil, err
 			}
 		}
@@ -224,12 +222,12 @@ func makeRandIntBuiltin(t *trace) *starlark.Builtin {
 		}
 
 		var result int64
-		if randIntEvent, ok := popEvent[events.RandIntEvent](t); ok {
+		if randIntEvent, ok := popEvent[RandIntEvent](t); ok {
 			result = randIntEvent.Result()
 		} else {
 			result = rand.Int63n(maxInt64)
 
-			if err := recordEvent(starlarkCtx.ctx, t, events.NewRandIntEvent(result)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, NewRandIntEvent(result)); err != nil {
 				return nil, err
 			}
 		}
@@ -312,7 +310,7 @@ func runThread[Input any, Output any](
 
 	// Record start event with input
 	scriptHash := sha256.Sum256(script)
-	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(hex.EncodeToString(scriptHash[:]), input)); err != nil {
+	if err := recordEvent(ctxWithRunID, t, NewStartEvent(hex.EncodeToString(scriptHash[:]), input)); err != nil {
 		return zero, fmt.Errorf("failed to record start event: %w", err)
 	}
 
@@ -324,7 +322,7 @@ func runThread[Input any, Output any](
 			return zero, err
 		}
 
-		if recordErr := recordEvent(ctxWithRunID, t, events.NewFinishEvent(nil, err)); recordErr != nil {
+		if recordErr := recordEvent(ctxWithRunID, t, NewFinishEvent(nil, err)); recordErr != nil {
 			return zero, fmt.Errorf("failed to record finish event with error: %w", recordErr)
 		}
 
@@ -352,7 +350,7 @@ func runThread[Input any, Output any](
 
 	// Record finish event
 	outputData, _ := starlarkToJSON(starlarkOutput)
-	if err := recordEvent(ctxWithRunID, t, events.NewFinishEvent(outputData, nil)); err != nil {
+	if err := recordEvent(ctxWithRunID, t, NewFinishEvent(outputData, nil)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
@@ -495,12 +493,12 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 		}
 
 		// Record call event
-		if err := recordEvent(starlarkCtx.ctx, t, events.NewCallEvent(regFn.name, req)); err != nil {
+		if err := recordEvent(starlarkCtx.ctx, t, NewCallEvent(regFn.name, req)); err != nil {
 			return starlark.None, fmt.Errorf("failed to record call event: %w", err)
 		}
 
 		// Check for replay
-		if returnEvent, ok := popEvent[events.ReturnEvent](t); ok {
+		if returnEvent, ok := popEvent[ReturnEvent](t); ok {
 			if _, retErr := returnEvent.Output(); retErr != nil {
 				return starlark.None, retErr
 			}
@@ -515,8 +513,8 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 		}
 
 		// Check for yield/resume
-		if yieldEvent, ok := popEvent[events.YieldEvent](t); ok {
-			resumeEvent, ok := popEvent[events.ResumeEvent](t)
+		if yieldEvent, ok := popEvent[YieldEvent](t); ok {
+			resumeEvent, ok := popEvent[ResumeEvent](t)
 			if !ok {
 				// still waiting for the signal to resume
 				return starlark.None, YieldErrorFrom(yieldEvent)
@@ -563,15 +561,15 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 		}
 
 		// Record return event
-		var event events.EventMetadata
+		var event EventMetadata
 		var yerr *YieldError
 		if errors.As(callErr, &yerr) {
 			runID, _ := GetRunID(starlarkCtx.ctx)
-			event = events.NewYieldEvent(yerr.cid, runID)
+			event = NewYieldEvent(yerr.cid, runID)
 		} else if callErr != nil {
-			event = events.NewReturnEvent(nil, callErr)
+			event = NewReturnEvent(nil, callErr)
 		} else {
-			event = events.NewReturnEvent(resp, nil)
+			event = NewReturnEvent(resp, nil)
 		}
 
 		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {
