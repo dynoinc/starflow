@@ -794,8 +794,8 @@ def main(ctx, input):
 
 	// Verify all retry attempts happened as expected
 	// The retry policies handle failures at the infrastructure level
-	s.Equal(3, checkpointAttempts, "Expected exactly 2 checkpoint attempts (with retries), got %d", checkpointAttempts)
-	s.Equal(4, dataProcessingAttempts, "Expected exactly 3 data processing attempts (with retries), got %d", dataProcessingAttempts)
+	s.Equal(2, checkpointAttempts, "Expected exactly 2 checkpoint attempts (with retries), got %d", checkpointAttempts)
+	s.Equal(3, dataProcessingAttempts, "Expected exactly 3 data processing attempts (with retries), got %d", dataProcessingAttempts)
 	s.Equal(4, finalValidationAttempts, "Expected exactly 4 final validation attempts (with retries), got %d", finalValidationAttempts)
 
 	// Get final event trace for comprehensive verification
