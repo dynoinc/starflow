@@ -32,6 +32,7 @@ type Store interface {
 	//
 	// Invariants:
 	// - Creating a run with a non-existent script hash fails.
+	// - Creating a run with a duplicate runID fails.
 	// - GetRun returns a deep copy of the run state at the time of retrieval, ensuring that external modifications to the returned object do not affect the stored run object.
 	// - ClaimRuns finds runs that are either in RunStatusPending or in RunStatusRunning with an expired lease, records a ClaimEvent for each, and returns the updated runs.
 	// - Run status transitions are strictly defined:
@@ -40,7 +41,7 @@ type Store interface {
 	//   - Running -> Completed (via Finish event)
 	//   - Running -> Failed (via Finish event with error)
 	//   - Yielded -> Pending (via Resume event)
-	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
+	CreateRun(ctx context.Context, runID string, scriptHash string, input *anypb.Any) error
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimRuns(ctx context.Context, workerID string, leaseUntil time.Time) ([]*Run, error)
 

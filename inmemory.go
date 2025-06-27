@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lithammer/shortuuid/v4"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/dynoinc/starflow/events"
@@ -69,10 +68,19 @@ func (s *InMemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byt
 	return content, nil
 }
 
-// CreateRun creates a new run record for a given script.
-func (s *InMemoryStore) CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error) {
-	runID := shortuuid.New()
+// CreateRun creates a new run record for a given script and runID.
+func (s *InMemoryStore) CreateRun(ctx context.Context, runID string, scriptHash string, input *anypb.Any) error {
 	now := time.Now()
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.scripts[scriptHash]; !exists {
+		return fmt.Errorf("script with hash %s not found", scriptHash)
+	}
+	if _, exists := s.runs[runID]; exists {
+		return fmt.Errorf("run with ID %s already exists", runID)
+	}
 
 	run := &Run{
 		ID:          runID,
@@ -84,16 +92,9 @@ func (s *InMemoryStore) CreateRun(ctx context.Context, scriptHash string, input 
 		UpdatedAt:   now,
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.scripts[scriptHash]; !exists {
-		return "", fmt.Errorf("script with hash %s not found", scriptHash)
-	}
-
 	s.runs[runID] = run
 	s.events[runID] = make([]*events.Event, 0)
-	return runID, nil
+	return nil
 }
 
 // GetRun retrieves the details of a specific run.

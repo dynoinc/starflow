@@ -13,6 +13,8 @@ import (
 
 	"go.starlark.net/syntax"
 
+	"github.com/lithammer/shortuuid/v4"
+
 	"github.com/dynoinc/starflow/events"
 )
 
@@ -71,32 +73,26 @@ func (c *Client[Input]) validateAndSave(ctx context.Context, script []byte) (str
 	return scriptHash, nil
 }
 
-// Run creates a new workflow run with the given script and input, returning the run ID.
-// The script should be valid Starlark code with a main function that accepts context and input parameters.
-// The input is serialized as a protobuf Any message for storage and execution.
+// Run creates a new workflow run with a script, and input, returning the run ID.
 func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (string, error) {
 	scriptHash, err := c.validateAndSave(ctx, script)
 	if err != nil {
 		return "", fmt.Errorf("failed to validate and save script: %w", err)
 	}
 
-	// Convert input to anypb.Any
 	var inputAny *anypb.Any
 	inputVal := reflect.ValueOf(input)
 	if !inputVal.IsNil() {
-		var err error
 		inputAny, err = anypb.New(input)
 		if err != nil {
 			return "", fmt.Errorf("failed to convert input to anypb.Any: %w", err)
 		}
 	}
 
-	// Create run
-	runID, err := c.store.CreateRun(ctx, scriptHash, inputAny)
-	if err != nil {
+	runID := shortuuid.New()
+	if err := c.store.CreateRun(ctx, runID, scriptHash, inputAny); err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
 	}
-
 	return runID, nil
 }
 
