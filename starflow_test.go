@@ -32,8 +32,8 @@ type ComplexRequest struct {
 }
 
 type ComplexResponse struct {
-	Result string                 `json:"result"`
-	Data   map[string]interface{} `json:"data"`
+	Result string         `json:"result"`
+	Data   map[string]any `json:"data"`
 }
 
 // WorkflowTestSuite provides a clean testing environment for starflow workflows.
@@ -90,7 +90,7 @@ func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...events.E
 }
 
 // Helper: registerFunction adds a function to the client
-func (s *WorkflowTestSuite) registerFunction(name string, fn interface{}) {
+func (s *WorkflowTestSuite) registerFunction(name string, fn any) {
 	switch f := fn.(type) {
 	case func(context.Context, PingRequest) (PingResponse, error):
 		starflow.RegisterFunc(s.client, f, starflow.WithName(name))
@@ -181,7 +181,7 @@ def main(ctx, input):
 // Test with basic primitive types
 func (s *WorkflowTestSuite) TestBasicTypes() {
 	// Test function that handles different types
-	typeTestFn := func(ctx context.Context, req interface{}) (interface{}, error) {
+	typeTestFn := func(ctx context.Context, req any) (any, error) {
 		switch v := req.(type) {
 		case string:
 			return "string: " + v, nil
@@ -189,19 +189,19 @@ func (s *WorkflowTestSuite) TestBasicTypes() {
 			return fmt.Sprintf("number: %.0f", v), nil
 		case bool:
 			return fmt.Sprintf("bool: %t", v), nil
-		case map[string]interface{}:
+		case map[string]any:
 			if msg, ok := v["message"].(string); ok {
-				return map[string]interface{}{"result": "object: " + msg}, nil
+				return map[string]any{"result": "object: " + msg}, nil
 			}
-			return map[string]interface{}{"result": "object: unknown"}, nil
-		case []interface{}:
+			return map[string]any{"result": "object: unknown"}, nil
+		case []any:
 			return fmt.Sprintf("array: %d items", len(v)), nil
 		default:
 			return "unknown type", nil
 		}
 	}
 
-	client := starflow.NewClient[interface{}, interface{}](s.store)
+	client := starflow.NewClient[any, any](s.store)
 	starflow.RegisterFunc(client, typeTestFn, starflow.WithName("test.TypeTest"))
 
 	// Test string
@@ -246,7 +246,7 @@ func (s *WorkflowTestSuite) TestComplexStructures() {
 	complexFn := func(ctx context.Context, req ComplexRequest) (ComplexResponse, error) {
 		return ComplexResponse{
 			Result: fmt.Sprintf("processed: %s (%d)", req.Text, req.Number),
-			Data: map[string]interface{}{
+			Data: map[string]any{
 				"flag":     req.Flag,
 				"tagCount": len(req.Tags),
 				"meta":     req.Meta,
@@ -290,7 +290,7 @@ def main(ctx, input):
 	s.Equal(float64(3), output.Data["tagCount"]) // JSON numbers are float64
 	s.Equal(true, output.Data["processed"])
 
-	meta, ok := output.Data["meta"].(map[string]interface{})
+	meta, ok := output.Data["meta"].(map[string]any)
 	s.Require().True(ok)
 	s.Equal("value1", meta["key1"])
 	s.Equal("value2", meta["key2"])
@@ -604,12 +604,10 @@ def main(ctx, input):
 	s.Contains(err.Error(), "event mismatch")
 }
 
-// In order for 'go test' to run this suite, we need to create a normal test function that calls suite.Run
 func TestWorkflowTestSuite(t *testing.T) {
 	suite.Run(t, new(WorkflowTestSuite))
 }
 
-// Store implementation compliance test
 func TestInMemoryStore(t *testing.T) {
 	starflowsuite.RunStoreSuite(t, func(t *testing.T) starflow.Store {
 		return starflow.NewInMemoryStore()

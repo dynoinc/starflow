@@ -43,7 +43,7 @@ func (c CallEvent) FunctionName() string { return c.functionName }
 func (c CallEvent) Input() any           { return c.input }
 
 func (c CallEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"functionName": c.functionName,
 		"input":        c.input,
 	})
@@ -80,7 +80,7 @@ func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 	if r.err != nil {
 		errStr = r.err.Error()
 	}
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"output": r.output,
 		"error":  errStr,
 	})
@@ -114,7 +114,7 @@ func (s SleepEvent) EventType() EventType { return EventTypeSleep }
 func (s SleepEvent) WakeupAt() time.Time  { return s.wakeupAt }
 
 func (s SleepEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"wakeupAt": s.wakeupAt,
 	})
 }
@@ -143,7 +143,7 @@ func (t TimeNowEvent) EventType() EventType { return EventTypeTimeNow }
 func (t TimeNowEvent) Timestamp() time.Time { return t.timestamp }
 
 func (t TimeNowEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"timestamp": t.timestamp,
 	})
 }
@@ -172,7 +172,7 @@ func (r RandIntEvent) EventType() EventType { return EventTypeRandInt }
 func (r RandIntEvent) Result() int64        { return r.result }
 
 func (r RandIntEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"result": r.result,
 	})
 }
@@ -203,7 +203,7 @@ func (y YieldEvent) SignalID() string     { return y.signalID }
 func (y YieldEvent) RunID() string        { return y.runID }
 
 func (y YieldEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"signalID": y.signalID,
 		"runID":    y.runID,
 	})
@@ -237,7 +237,7 @@ func (r ResumeEvent) SignalID() string     { return r.signalID }
 func (r ResumeEvent) Output() any          { return r.output }
 
 func (r ResumeEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"signalID": r.signalID,
 		"output":   r.output,
 	})
@@ -274,7 +274,7 @@ func (f FinishEvent) MarshalJSON() ([]byte, error) {
 	if f.err != nil {
 		errStr = f.err.Error()
 	}
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"output": f.output,
 		"error":  errStr,
 	})
@@ -310,7 +310,7 @@ func (s StartEvent) ScriptHash() string   { return s.scriptHash }
 func (s StartEvent) Input() any           { return s.input }
 
 func (s StartEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
+	return json.Marshal(map[string]any{
 		"scriptHash": s.scriptHash,
 		"input":      s.input,
 	})

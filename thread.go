@@ -390,7 +390,7 @@ func runThread[Input any, Output any](
 }
 
 // Helper functions for Starlark <-> JSON conversion
-func jsonToStarlark(data interface{}) (starlark.Value, error) {
+func jsonToStarlark(data any) (starlark.Value, error) {
 	switch v := data.(type) {
 	case nil:
 		return starlark.None, nil
@@ -404,7 +404,7 @@ func jsonToStarlark(data interface{}) (starlark.Value, error) {
 		return starlark.Float(v), nil
 	case string:
 		return starlark.String(v), nil
-	case []interface{}:
+	case []any:
 		list := make([]starlark.Value, len(v))
 		for i, item := range v {
 			val, err := jsonToStarlark(item)
@@ -414,7 +414,7 @@ func jsonToStarlark(data interface{}) (starlark.Value, error) {
 			list[i] = val
 		}
 		return starlark.NewList(list), nil
-	case map[string]interface{}:
+	case map[string]any:
 		dict := starlark.NewDict(len(v))
 		for key, value := range v {
 			val, err := jsonToStarlark(value)
@@ -431,7 +431,7 @@ func jsonToStarlark(data interface{}) (starlark.Value, error) {
 			return nil, fmt.Errorf("unsupported type %T: %w", data, err)
 		}
 
-		var jsonData interface{}
+		var jsonData any
 		if err := json.Unmarshal(jsonBytes, &jsonData); err != nil {
 			return nil, err
 		}
@@ -440,7 +440,7 @@ func jsonToStarlark(data interface{}) (starlark.Value, error) {
 	}
 }
 
-func starlarkToJSON(value starlark.Value) (interface{}, error) {
+func starlarkToJSON(value starlark.Value) (any, error) {
 	switch v := value.(type) {
 	case starlark.NoneType:
 		return nil, nil
@@ -457,7 +457,7 @@ func starlarkToJSON(value starlark.Value) (interface{}, error) {
 	case starlark.String:
 		return string(v), nil
 	case *starlark.List:
-		result := make([]interface{}, v.Len())
+		result := make([]any, v.Len())
 		for i := 0; i < v.Len(); i++ {
 			val, err := starlarkToJSON(v.Index(i))
 			if err != nil {
@@ -467,7 +467,7 @@ func starlarkToJSON(value starlark.Value) (interface{}, error) {
 		}
 		return result, nil
 	case *starlark.Dict:
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for _, k := range v.Keys() {
 			key, ok := k.(starlark.String)
 			if !ok {
