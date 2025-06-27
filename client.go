@@ -1,40 +1,152 @@
+// Package starflow provides a workflow engine for Go that enables deterministic,
+// resumable, and distributed workflow execution using Starlark scripting. Every
+// execution step is recorded and can be resumed exactly where it left off.
+//
+// # Key Features
+//
+//   - Deterministic & Durable Workflows: Write workflows that are deterministic
+//     and can be replayed from any point with full durability guarantees
+//   - Pluggable Backends: Works with any backend that implements the Store interface
+//   - Distributed Execution: Multiple workers can process workflow runs concurrently
+//   - Resumable Workflows: Workflows can yield and resume based on external signals
+//
+// For more information, see https://github.com/dynoinc/starflow
 package starflow
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
+	"path"
 	"reflect"
-	"sync"
+	"runtime"
+	"strings"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"go.starlark.net/syntax"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/lithammer/shortuuid/v4"
 
 	"github.com/dynoinc/starflow/events"
 )
 
+type registeredFn struct {
+	fn          func(ctx context.Context, req proto.Message) (proto.Message, error)
+	reqType     proto.Message
+	resType     proto.Message
+	name        string
+	retryPolicy backoff.BackOff
+}
+
+// Option configures behaviour of a registered function.
+type Option func(*registeredFn)
+
+// WithName overrides the automatically derived name for the function.
+// The name must be in the format "module.funcname".
+func WithName(name string) Option {
+	return func(rf *registeredFn) {
+		// Validate that the name is in the correct format
+		if !strings.Contains(name, ".") {
+			panic(fmt.Sprintf("function name must be in format 'module.funcname', got: %s", name))
+		}
+		rf.name = name
+	}
+}
+
+// WithRetryPolicy specifies a retry policy for the function.
+func WithRetryPolicy(b backoff.BackOff) Option {
+	return func(rf *registeredFn) {
+		rf.retryPolicy = b
+	}
+}
+
 // Client provides an interface for creating and managing workflow runs.
-type Client[Input proto.Message] struct {
-	store       Store
-	scriptCache sync.Map // map[string]struct{} (scriptHash -> struct{})
+type Client[Input proto.Message, Output proto.Message] struct {
+	store Store
+
+	registry      map[string]registeredFn
+	types         map[string]proto.Message
+	protoRegistry *customProtoRegistry
 }
 
 // NewClient creates a new workflow client with the specified input type.
 // The client uses the provided store for persistence and workflow management.
-func NewClient[Input proto.Message](store Store) *Client[Input] {
-	return &Client[Input]{
-		store: store,
+func NewClient[Input proto.Message, Output proto.Message](store Store) *Client[Input, Output] {
+	return &Client[Input, Output]{
+		store:         store,
+		registry:      make(map[string]registeredFn),
+		types:         make(map[string]proto.Message),
+		protoRegistry: newCustomProtoRegistry(),
 	}
+}
+
+// RegisterFunc registers a Go function to be callable from Starlark using generics and reflection.
+// The function must have the signature: func(ctx context.Context, req ReqType) (ResType, error)
+// where ReqType and ResType implement proto.Message.
+//
+// The function will be automatically named based on its package and function name,
+// or you can override this using the WithName option.
+func RegisterFunc[Input proto.Message, Output proto.Message, Req proto.Message, Res proto.Message](
+	c *Client[Input, Output],
+	fn func(ctx context.Context, req Req) (Res, error),
+	opts ...Option,
+) {
+	// Create instances to get the types (not zero values)
+	var req Req
+	var res Res
+
+	// Use reflection to create actual instances
+	reqType := reflect.TypeOf(req).Elem()
+	resType := reflect.TypeOf(res).Elem()
+
+	reqInstance := reflect.New(reqType).Interface().(proto.Message)
+	resInstance := reflect.New(resType).Interface().(proto.Message)
+
+	// Wrap the typed function to match the expected signature
+	wrappedFn := func(ctx context.Context, reqMsg proto.Message) (proto.Message, error) {
+		// Cast the proto.Message to the specific type
+		typedReq, ok := reqMsg.(Req)
+		if !ok {
+			return nil, fmt.Errorf("invalid request type: expected %T, got %T", req, reqMsg)
+		}
+
+		return fn(ctx, typedReq)
+	}
+
+	reg := registeredFn{
+		fn:      wrappedFn,
+		reqType: reqInstance,
+		resType: resInstance,
+	}
+	for _, o := range opts {
+		o(&reg)
+	}
+
+	if reg.name == "" {
+		full := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+		function := strings.TrimPrefix(path.Ext(full), ".")
+		module := path.Base(strings.TrimSuffix(full, path.Ext(full)))
+		reg.name = module + "." + function
+	}
+
+	c.registry[reg.name] = reg
+	c.types[reg.name] = reqInstance
+	c.types[reg.name+"_response"] = resInstance
+}
+
+// RegisterProto registers a proto file descriptor with the worker's proto registry.
+// This allows Starlark scripts to access the proto definitions.
+func (c *Client[Input, Output]) RegisterProto(fileDescriptor protoreflect.FileDescriptor) {
+	c.protoRegistry.customFiles[fileDescriptor.Path()] = fileDescriptor
 }
 
 // validateScript performs validation on the Starlark script.
 // It checks for syntax errors and ensures the script has a main function.
-func (c *Client[Input]) validateScript(script []byte) error {
+func validateScript(script []byte) error {
 	// Parse the script to check for syntax errors
 	parsed, err := (&syntax.FileOptions{}).Parse("script", script, 0)
 	if err != nil {
@@ -52,73 +164,68 @@ func (c *Client[Input]) validateScript(script []byte) error {
 	return fmt.Errorf("script must contain a main function")
 }
 
-func (c *Client[Input]) validateAndSave(ctx context.Context, script []byte) (string, error) {
-	hash := sha256.Sum256(script)
-	scriptHash := hex.EncodeToString(hash[:])
-
-	if _, ok := c.scriptCache.Load(scriptHash); ok {
-		return scriptHash, nil
-	}
-
-	if err := c.validateScript(script); err != nil {
-		return "", fmt.Errorf("script validation failed: %w", err)
-	}
-
-	err := c.store.SaveScript(ctx, scriptHash, script)
-	if err != nil {
-		return "", fmt.Errorf("failed to save script: %w", err)
-	}
-
-	c.scriptCache.Store(scriptHash, struct{}{})
-	return scriptHash, nil
-}
-
 // Run creates a new workflow run with a script, and input, returning the run ID.
-func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (string, error) {
-	scriptHash, err := c.validateAndSave(ctx, script)
-	if err != nil {
-		return "", fmt.Errorf("failed to validate and save script: %w", err)
+func (c *Client[Input, Output]) Run(ctx context.Context, runID string, script []byte, input Input) (Output, error) {
+	if err := validateScript(script); err != nil {
+		var zero Output
+		return zero, fmt.Errorf("failed to validate script: %w", err)
 	}
 
-	var inputAny *anypb.Any
-	inputVal := reflect.ValueOf(input)
-	if !inputVal.IsNil() {
-		inputAny, err = anypb.New(input)
-		if err != nil {
-			return "", fmt.Errorf("failed to convert input to anypb.Any: %w", err)
-		}
-	}
-
-	runID := shortuuid.New()
-	startEvent := events.NewStartEvent(scriptHash, inputAny)
-	_, err = c.store.RecordEvent(ctx, runID, 0, startEvent)
-	if err != nil {
-		return "", fmt.Errorf("failed to create run: %w", err)
-	}
-	return runID, nil
-}
-
-// GetRun retrieves a workflow run by its ID.
-// Returns the run details including status, input, output, and error information.
-func (c *Client[Input]) GetRun(ctx context.Context, runID string) (*Run, error) {
-	return c.store.GetRun(ctx, runID)
+	return runThread(ctx, c, runID, script, input)
 }
 
 // GetEvents retrieves the execution history of a workflow run.
 // Returns a chronological list of events that occurred during execution.
-func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*events.Event, error) {
+func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]*events.Event, error) {
 	return c.store.GetEvents(ctx, runID)
 }
 
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
-func (c *Client[Input]) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
-	run, err := c.store.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-
+func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
 	resumeEvent := events.NewResumeEvent(cid, output)
-	_, err = c.store.RecordEvent(ctx, runID, run.NextEventID, resumeEvent)
+	_, err := c.store.RecordEvent(ctx, runID, 0, resumeEvent)
 	return err
 }
+
+// Context key for runID
+type runIDKey struct{}
+
+// WithRunID adds runID to the context
+func WithRunID(ctx context.Context, runID string) context.Context {
+	return context.WithValue(ctx, runIDKey{}, runID)
+}
+
+// GetRunID extracts runID from context
+func GetRunID(ctx context.Context) (string, bool) {
+	runID, ok := ctx.Value(runIDKey{}).(string)
+	return runID, ok
+}
+
+// YieldError is returned when the script yields waiting for a signal.
+type YieldError struct {
+	cid   string
+	runID string
+}
+
+func (e *YieldError) Error() string {
+	return fmt.Sprintf("yield error: %s (run: %s)", e.cid, e.runID)
+}
+
+func NewYieldError(ctx context.Context) (string, string, error) {
+	runID, ok := GetRunID(ctx)
+	if !ok {
+		return "", "", fmt.Errorf("runID not found in context")
+	}
+	cid := shortuuid.New()
+	return runID, cid, &YieldError{cid: cid, runID: runID}
+}
+
+func YieldErrorFrom(yieldEvent events.YieldEvent) *YieldError {
+	return &YieldError{cid: yieldEvent.SignalID(), runID: yieldEvent.RunID()}
+}
+
+// ErrConcurrentUpdate indicates optimistic concurrency failure.
+// This error is returned when a concurrent update to a run is detected,
+// typically when multiple workers try to claim the same run simultaneously.
+var ErrConcurrentUpdate = errors.New("concurrent update")

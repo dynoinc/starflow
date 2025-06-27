@@ -23,29 +23,74 @@ import (
 	"github.com/dynoinc/starflow/events"
 )
 
-// thread executes a single workflow run.
-type thread[Input proto.Message] struct {
-	recorder *eventRecorder
-	events   []*events.Event
+type trace struct {
+	runID string
+	store Store
+
+	events      []*events.Event
+	nextEventID int
 }
 
-func popEvent[ET events.EventMetadata, Input proto.Message](t *thread[Input]) (ET, error, bool) {
+func newTrace(runID string, store Store, events []*events.Event) *trace {
+	return &trace{
+		runID: runID,
+		store: store,
+
+		events:      events,
+		nextEventID: len(events),
+	}
+}
+
+func peekEvent[ET events.EventMetadata](t *trace) (ET, bool) {
 	var zero ET
 	if len(t.events) == 0 {
-		return zero, nil, false
+		return zero, false
 	}
 
 	nextEvent := t.events[0]
 	if nextEvent.Type() != zero.EventType() {
-		return zero, fmt.Errorf("expected event type %s, got %s", zero.EventType(), nextEvent.Type()), false
+		return zero, false
+	}
+
+	return nextEvent.Metadata.(ET), true
+}
+
+func popEvent[ET events.EventMetadata](t *trace) (ET, bool) {
+	var zero ET
+	if len(t.events) == 0 {
+		return zero, false
+	}
+
+	nextEvent := t.events[0]
+	if nextEvent.Type() != zero.EventType() {
+		return zero, false
 	}
 
 	t.events = t.events[1:]
-	return nextEvent.Metadata.(ET), nil, true
+	return nextEvent.Metadata.(ET), true
+}
+
+func recordEvent[ET events.EventMetadata](ctx context.Context, t *trace, event ET) error {
+	if _, ok := popEvent[ET](t); ok {
+		// TODO: verify recorded event and expected event should be the same
+		return nil
+	}
+
+	if len(t.events) != 0 {
+		return fmt.Errorf("trying to record event %s, but there are %d events left in the trace", event.EventType(), len(t.events))
+	}
+
+	nextEventID, err := t.store.RecordEvent(ctx, t.runID, t.nextEventID, event)
+	if err != nil {
+		return fmt.Errorf("failed to record event: %w", err)
+	}
+
+	t.nextEventID = nextEventID
+	return nil
 }
 
 // createInputInstance creates a new instance of the Input type using reflection
-func (t *thread[Input]) createInputInstance() Input {
+func createInputInstance[Input proto.Message]() Input {
 	var zero Input
 	inputType := reflect.TypeOf(zero).Elem()
 	return reflect.New(inputType).Interface().(Input)
@@ -80,7 +125,7 @@ func (m *starlarkModule) AttrNames() []string {
 	return names
 }
 
-func (t *thread[Input]) globals(registry map[string]registeredFn) (starlark.StringDict, error) {
+func globals(t *trace, registry map[string]registeredFn) (starlark.StringDict, error) {
 	globals := make(starlark.StringDict)
 
 	// Group functions by module
@@ -107,7 +152,7 @@ func (t *thread[Input]) globals(registry map[string]registeredFn) (starlark.Stri
 }
 
 // makeSleepBuiltin returns a starlark builtin implementing durable sleep.
-func (t *thread[Input]) makeSleepBuiltin() *starlark.Builtin {
+func makeSleepBuiltin(t *trace) *starlark.Builtin {
 	return starlark.NewBuiltin("sleep", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var durationVal starlark.Value
@@ -132,13 +177,10 @@ func (t *thread[Input]) makeSleepBuiltin() *starlark.Builtin {
 		}
 
 		sleepDuration := durMsg.AsDuration()
-		if sleepEvent, err, ok := popEvent[events.SleepEvent](t); ok {
-			if err != nil {
-				return nil, err
-			}
+		if sleepEvent, ok := popEvent[events.SleepEvent](t); ok {
 			sleepDuration = time.Until(sleepEvent.WakeupAt())
 		} else {
-			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, events.NewSleepEvent(time.Now().Add(sleepDuration))); err != nil {
 				return nil, err
 			}
 		}
@@ -154,7 +196,7 @@ func (t *thread[Input]) makeSleepBuiltin() *starlark.Builtin {
 }
 
 // makeTimeNowBuiltin returns a starlark builtin implementing deterministic time.now.
-func (t *thread[Input]) makeTimeNowBuiltin() *starlark.Builtin {
+func makeTimeNowBuiltin(t *trace) *starlark.Builtin {
 	return starlark.NewBuiltin("now", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		if err := starlark.UnpackArgs("now", args, kwargs, "ctx", &ctxVal); err != nil {
@@ -167,15 +209,12 @@ func (t *thread[Input]) makeTimeNowBuiltin() *starlark.Builtin {
 		}
 
 		var timestamp time.Time
-		if timeNowEvent, err, ok := popEvent[events.TimeNowEvent](t); ok {
-			if err != nil {
-				return nil, err
-			}
+		if timeNowEvent, ok := popEvent[events.TimeNowEvent](t); ok {
 			timestamp = timeNowEvent.Timestamp()
 		} else {
 			timestamp = time.Now()
 
-			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewTimeNowEvent(timestamp)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, events.NewTimeNowEvent(timestamp)); err != nil {
 				return nil, err
 			}
 		}
@@ -187,7 +226,7 @@ func (t *thread[Input]) makeTimeNowBuiltin() *starlark.Builtin {
 }
 
 // makeRandIntBuiltin returns a starlark builtin implementing deterministic rand.int.
-func (t *thread[Input]) makeRandIntBuiltin() *starlark.Builtin {
+func makeRandIntBuiltin(t *trace) *starlark.Builtin {
 	return starlark.NewBuiltin("int", func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var maxVal starlark.Value
@@ -211,15 +250,12 @@ func (t *thread[Input]) makeRandIntBuiltin() *starlark.Builtin {
 		}
 
 		var result int64
-		if randIntEvent, err, ok := popEvent[events.RandIntEvent](t); ok {
-			if err != nil {
-				return nil, err
-			}
+		if randIntEvent, ok := popEvent[events.RandIntEvent](t); ok {
 			result = randIntEvent.Result()
 		} else {
 			result = rand.Int63n(maxInt64)
 
-			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewRandIntEvent(result)); err != nil {
+			if err := recordEvent(starlarkCtx.ctx, t, events.NewRandIntEvent(result)); err != nil {
 				return nil, err
 			}
 		}
@@ -228,60 +264,40 @@ func (t *thread[Input]) makeRandIntBuiltin() *starlark.Builtin {
 	})
 }
 
-func runThread[Input proto.Message](
+func runThread[Input proto.Message, Output proto.Message](
 	ctx context.Context,
-	w *Worker[Input],
-	run *Run,
-	recorder *eventRecorder,
-) (proto.Message, error) {
-	t := &thread[Input]{recorder: recorder}
-
-	var zero proto.Message
-	script, err := w.store.GetScript(ctx, run.ScriptHash)
-	if err != nil {
-		return zero, fmt.Errorf("failed to get script: %w", err)
-	}
-
-	eventList, err := w.store.GetEvents(ctx, run.ID)
+	c *Client[Input, Output],
+	runID string,
+	script []byte,
+	input Input,
+) (Output, error) {
+	var zero Output
+	eventList, err := c.store.GetEvents(ctx, runID)
 	if err != nil {
 		return zero, fmt.Errorf("failed to get events: %w", err)
 	}
-	for _, event := range eventList {
-		if event.Type() == events.EventTypeClaim {
-			continue
-		}
 
-		t.events = append(t.events, event)
-	}
-
-	// Unmarshal the input from anypb.Any
-	var input Input
-	if run.Input != nil {
-		input = t.createInputInstance()
-		if err := run.Input.UnmarshalTo(input); err != nil {
-			return zero, fmt.Errorf("failed to unmarshal run input: %w", err)
-		}
-	}
+	t := newTrace(runID, c.store, eventList)
 
 	thread := &starlark.Thread{
-		Name:  fmt.Sprintf("run-%s", run.ID),
+		Name:  fmt.Sprintf("run-%s", runID),
 		Print: func(_ *starlark.Thread, msg string) { fmt.Println(msg) },
 		Load: func(thread *starlark.Thread, module string) (starlark.StringDict, error) {
 			if module == "proto" {
-				protoModule := starlarkproto.NewModule(w.protoRegistry)
+				protoModule := starlarkproto.NewModule(c.protoRegistry)
 				return starlark.StringDict{
 					"proto": protoModule,
 				}, nil
 			}
 			if module == "time" {
 				members := make(starlark.StringDict)
-				members["sleep"] = t.makeSleepBuiltin()
-				members["now"] = t.makeTimeNowBuiltin()
+				members["sleep"] = makeSleepBuiltin(t)
+				members["now"] = makeTimeNowBuiltin(t)
 				return members, nil
 			}
 			if module == "rand" {
 				members := make(starlark.StringDict)
-				members["int"] = t.makeRandIntBuiltin()
+				members["int"] = makeRandIntBuiltin(t)
 				return members, nil
 			}
 			if module == "math" {
@@ -295,16 +311,13 @@ func runThread[Input proto.Message](
 		},
 	}
 
-	globals, err := t.globals(w.registry)
+	globals, err := globals(t, c.registry)
 	if err != nil {
 		return zero, fmt.Errorf("failed to get globals: %w", err)
 	}
+
 	globalsAfterExec, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, "script", script, globals)
 	if err != nil {
-		// Record finish event with error for script execution failures
-		if recordErr := t.recorder.recordEvent(ctx, events.NewFinishEvent(nil, err)); recordErr != nil {
-			return zero, fmt.Errorf("failed to record finish event with error: %w", recordErr)
-		}
 		return zero, fmt.Errorf("starlark execution failed: %w", err)
 	}
 
@@ -319,9 +332,18 @@ func runThread[Input proto.Message](
 	}
 
 	// Create starlark context value that can be passed to main
-	ctxWithRunID := WithRunID(ctx, run.ID)
+	ctxWithRunID := WithRunID(ctx, runID)
 	starlarkCtx := &starlarkContext{ctx: ctxWithRunID}
 	starlarkInput := starlarkproto.MakeMessage(input)
+
+	inputAny, err := anypb.New(input)
+	if err != nil {
+		return zero, fmt.Errorf("failed to marshal input: %w", err)
+	}
+
+	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(runID, inputAny)); err != nil {
+		return zero, fmt.Errorf("failed to record start event: %w", err)
+	}
 
 	// Call main with context and input
 	starlarkOutput, err := starlark.Call(thread, mainFn, starlark.Tuple{starlarkCtx, starlarkInput}, nil)
@@ -331,19 +353,20 @@ func runThread[Input proto.Message](
 			return zero, err
 		}
 
-		if recordErr := t.recorder.recordEvent(ctx, events.NewFinishEvent(nil, err)); recordErr != nil {
+		if recordErr := recordEvent(ctxWithRunID, t, events.NewFinishEvent(nil, err)); recordErr != nil {
 			return zero, fmt.Errorf("failed to record finish event with error: %w", recordErr)
 		}
+
 		return zero, fmt.Errorf("error calling main function: %w", err)
 	}
 
-	var output proto.Message
+	var output Output
 	if starlarkOutput != starlark.None {
 		pm, ok := starlarkOutput.(*starlarkproto.Message)
 		if !ok {
 			return zero, fmt.Errorf("main return value is not a proto message, got %s", starlarkOutput.Type())
 		}
-		output = pm.ProtoReflect().Interface()
+		output = pm.ProtoReflect().Interface().(Output)
 	}
 
 	outputAny, err := anypb.New(output)
@@ -351,7 +374,7 @@ func runThread[Input proto.Message](
 		return zero, fmt.Errorf("failed to convert output to anypb.Any: %w", err)
 	}
 
-	if err := t.recorder.recordEvent(ctx, events.NewFinishEvent(outputAny, nil)); err != nil {
+	if err := recordEvent(ctxWithRunID, t, events.NewFinishEvent(outputAny, nil)); err != nil {
 		return zero, fmt.Errorf("failed to record finish event: %w", err)
 	}
 
@@ -370,7 +393,7 @@ func (sc *starlarkContext) Truth() starlark.Bool  { return starlark.True }
 func (sc *starlarkContext) Hash() (uint32, error) { return 0, fmt.Errorf("unhashable type: context") }
 
 // wrapFn wraps a Go function to be callable from Starlark.
-func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark.Builtin {
+func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 	return starlark.NewBuiltin(regFn.name, func(thread *starlark.Thread, _ *starlark.Builtin, args starlark.Tuple, kwargs []starlark.Tuple) (starlark.Value, error) {
 		var ctxVal starlark.Value
 		var reqVal starlark.Value
@@ -393,39 +416,16 @@ func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark
 			proto.Merge(req, pm.ProtoReflect().Interface())
 		}
 
-		if callEvent, err, ok := popEvent[events.CallEvent](t); ok {
-			if err != nil {
-				return starlark.None, err
-			}
-
-			if callEvent.FunctionName() != regFn.name {
-				return starlark.None, fmt.Errorf("expected function name %s, got %s", regFn.name, callEvent.FunctionName())
-			}
-
-			expectedProto := proto.Clone(regFn.reqType)
-			if err := callEvent.Input().UnmarshalTo(expectedProto); err != nil {
-				return starlark.None, fmt.Errorf("failed to unmarshal expected proto: %w", err)
-			}
-
-			if !proto.Equal(req, expectedProto) {
-				return starlark.None, fmt.Errorf("expected input to be %v, got %v", expectedProto, req)
-			}
-		} else {
-			inputAny, err := anypb.New(req)
-			if err != nil {
-				return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
-			}
-
-			if err := t.recorder.recordEvent(starlarkCtx.ctx, events.NewCallEvent(regFn.name, inputAny)); err != nil {
-				return starlark.None, err
-			}
+		reqAny, err := anypb.New(req)
+		if err != nil {
+			return starlark.None, fmt.Errorf("failed to marshal request: %w", err)
 		}
 
-		if returnEvent, err, ok := popEvent[events.ReturnEvent](t); ok {
-			if err != nil {
-				return starlark.None, err
-			}
+		if err := recordEvent(starlarkCtx.ctx, t, events.NewCallEvent(regFn.name, reqAny)); err != nil {
+			return starlark.None, fmt.Errorf("failed to record call event: %w", err)
+		}
 
+		if returnEvent, ok := popEvent[events.ReturnEvent](t); ok {
 			if _, retErr := returnEvent.Output(); retErr != nil {
 				return starlark.None, retErr
 			}
@@ -437,28 +437,15 @@ func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark
 				}
 
 				return starlarkproto.MakeMessage(respProto), nil
-			} else {
-				return starlark.None, nil
 			}
 		}
 
-		if yieldEvent, err, ok := popEvent[events.YieldEvent](t); ok {
-			if err != nil {
-				return starlark.None, err
-			}
-
-			resumeEvent, err, ok := popEvent[events.ResumeEvent](t)
+		if yieldEvent, ok := popEvent[events.YieldEvent](t); ok {
+			resumeEvent, ok := popEvent[events.ResumeEvent](t)
 			if !ok {
 				// still waiting for the signal to resume. ideally we should have not tried to resume the run
 				// but anyways, life happens.
 				return starlark.None, YieldErrorFrom(yieldEvent)
-			}
-			if err != nil {
-				return starlark.None, err
-			}
-
-			if resumeEvent.SignalID() != yieldEvent.SignalID() {
-				return starlark.None, fmt.Errorf("expected signal id %s, got %s", yieldEvent.SignalID(), resumeEvent.SignalID())
 			}
 
 			if resumeEvent.Output() != nil {
@@ -468,9 +455,9 @@ func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark
 				}
 
 				return starlarkproto.MakeMessage(respProto), nil
-			} else {
-				return starlark.None, nil
 			}
+
+			return starlark.None, nil
 		}
 
 		var resp proto.Message
@@ -480,13 +467,16 @@ func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark
 					err = fmt.Errorf("panic: %v", r)
 				}
 			}()
+
 			resp, err = regFn.fn(starlarkCtx.ctx, req)
 			if err != nil {
 				if errors.Is(err, &YieldError{}) {
 					return backoff.Permanent(err)
 				}
+
 				return err
 			}
+
 			return nil
 		}
 
@@ -514,7 +504,7 @@ func wrapFn[Input proto.Message](t *thread[Input], regFn registeredFn) *starlark
 			event = events.NewReturnEvent(outputAny, nil)
 		}
 
-		if err := t.recorder.recordEvent(starlarkCtx.ctx, event); err != nil {
+		if err := recordEvent(starlarkCtx.ctx, t, event); err != nil {
 			return starlark.None, err
 		}
 

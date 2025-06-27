@@ -12,16 +12,18 @@ import (
 type EventType string
 
 const (
-	EventTypeCall    EventType = "CALL"
-	EventTypeReturn  EventType = "RETURN"
+	EventTypeStart  EventType = "START"
+	EventTypeFinish EventType = "FINISH"
+
+	EventTypeCall   EventType = "CALL"
+	EventTypeReturn EventType = "RETURN"
+
+	EventTypeYield  EventType = "YIELD"
+	EventTypeResume EventType = "RESUME"
+
 	EventTypeSleep   EventType = "SLEEP"
 	EventTypeTimeNow EventType = "TIME_NOW"
 	EventTypeRandInt EventType = "RAND_INT"
-	EventTypeYield   EventType = "YIELD"
-	EventTypeResume  EventType = "RESUME"
-	EventTypeFinish  EventType = "FINISH"
-	EventTypeClaim   EventType = "CLAIM"
-	EventTypeStart   EventType = "START"
 )
 
 type EventMetadata interface {
@@ -292,40 +294,6 @@ func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	if aux.Error != "" {
 		f.err = fmt.Errorf("%s", aux.Error)
 	}
-	return nil
-}
-
-// ClaimEvent
-type ClaimEvent struct {
-	workerID string
-	until    time.Time
-}
-
-func NewClaimEvent(workerID string, until time.Time) ClaimEvent {
-	return ClaimEvent{workerID: workerID, until: until}
-}
-
-func (c ClaimEvent) EventType() EventType { return EventTypeClaim }
-func (c ClaimEvent) WorkerID() string     { return c.workerID }
-func (c ClaimEvent) Until() time.Time     { return c.until }
-
-func (c ClaimEvent) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]interface{}{
-		"workerID": c.workerID,
-		"until":    c.until,
-	})
-}
-
-func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
-	var aux struct {
-		WorkerID string    `json:"workerID"`
-		Until    time.Time `json:"until"`
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	c.workerID = aux.WorkerID
-	c.until = aux.Until
 	return nil
 }
 

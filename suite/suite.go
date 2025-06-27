@@ -108,19 +108,19 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		run, err := s.GetRun(ctx, runID)
 		require.NoError(t, err)
-		require.Equal(t, int64(0), run.NextEventID)
+		require.Equal(t, int64(1), run.NextEventID)
 
 		nextEventID, err := s.RecordEvent(ctx, runID, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
-		require.Equal(t, int64(1), nextEventID)
+		require.Equal(t, int64(2), nextEventID)
 
 		nextEventID, err = s.RecordEvent(ctx, runID, nextEventID, events.NewCallEvent("fn", nil))
 		require.NoError(t, err)
-		require.Equal(t, int64(2), nextEventID)
+		require.Equal(t, int64(3), nextEventID)
 
 		run, err = s.GetRun(ctx, runID)
 		require.NoError(t, err)
-		require.Equal(t, int64(2), run.NextEventID)
+		require.Equal(t, int64(3), run.NextEventID)
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
@@ -450,11 +450,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		// Get all events
 		runEvents, err := s.GetEvents(ctx, runID)
 		require.NoError(t, err)
-		require.Len(t, runEvents, 4)
-		require.Equal(t, events.EventTypeClaim, runEvents[0].Type())
-		require.Equal(t, events.EventTypeCall, runEvents[1].Type())
+		require.Len(t, runEvents, 5)
+		require.Equal(t, events.EventTypeStart, runEvents[0].Type())
+		require.Equal(t, events.EventTypeClaim, runEvents[1].Type())
 		require.Equal(t, events.EventTypeCall, runEvents[2].Type())
-		require.Equal(t, events.EventTypeReturn, runEvents[3].Type())
+		require.Equal(t, events.EventTypeCall, runEvents[3].Type())
+		require.Equal(t, events.EventTypeReturn, runEvents[4].Type())
 	})
 
 	t.Run("SignalInvariants", func(t *testing.T) {

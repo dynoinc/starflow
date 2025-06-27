@@ -109,7 +109,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "pong: hello")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall,
 		events.EventTypeReturn,
 		events.EventTypeFinish,
@@ -152,7 +152,7 @@ def main(ctx, input):
 	s.assertRunOutput(run, "Completed: HTTP response simulated + DB result for: db_example")
 
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall, events.EventTypeReturn,
 		events.EventTypeCall, events.EventTypeReturn,
 		events.EventTypeFinish,
@@ -161,8 +161,8 @@ def main(ctx, input):
 	// Specific checks for function names in CallEvents
 	runEvents, err := s.client.GetEvents(context.Background(), runID)
 	s.Require().NoError(err)
-	s.Require().Equal("starflow_test.httpCallFn", runEvents[1].Metadata.(events.CallEvent).FunctionName())
-	s.Require().Equal("starflow_test.dbQueryFn", runEvents[3].Metadata.(events.CallEvent).FunctionName())
+	s.Require().Equal("starflow_test.httpCallFn", runEvents[2].Metadata.(events.CallEvent).FunctionName())
+	s.Require().Equal("starflow_test.dbQueryFn", runEvents[4].Metadata.(events.CallEvent).FunctionName())
 }
 
 // TestWorkflow_StarlarkMathImport tests the use of Starlark's built-in math module.
@@ -180,7 +180,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "4.0") // Starlark sqrt returns float
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeFinish,
 	)
 }
@@ -218,7 +218,7 @@ def main(ctx, input):
 
 	// For now, expect the basic event sequence since retries might be internal
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall,
 		events.EventTypeReturn,
 		events.EventTypeFinish,
@@ -241,7 +241,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "woke")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeSleep,
 		events.EventTypeFinish,
 	)
@@ -268,7 +268,7 @@ def main(ctx, input):
 	s.Require().Contains(run.Error.Error(), "intentional failure: should fail")
 
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall,
 		events.EventTypeReturn,
 		events.EventTypeFinish,
@@ -292,7 +292,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "pong: test")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall,
 		events.EventTypeReturn,
 		events.EventTypeFinish,
@@ -323,7 +323,6 @@ def main(ctx, input):
 
 	// Process the workflow, it should yield
 	s.worker.ProcessOnce(context.Background())
-
 	s.assertRunStatus(runID, starflow.RunStatusYielded)
 
 	// Resume the workflow
@@ -349,8 +348,8 @@ def main(ctx, input):
 	s.Require().GreaterOrEqual(len(runEvents), 4, "Should have at least claim, call, yield, and finish events")
 
 	// Verify we have the key events in the right order
-	s.Require().Equal(events.EventTypeClaim, runEvents[0].Type())
-	s.Require().Equal(events.EventTypeCall, runEvents[1].Type())
+	s.Require().Equal(events.EventTypeStart, runEvents[0].Type())
+	s.Require().Equal(events.EventTypeClaim, runEvents[1].Type())
 
 	// Find yield event
 	foundYield := false
@@ -390,7 +389,7 @@ def main(ctx, input):
 	s.Require().Contains(outputResp.Message, "rand:")
 
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeTimeNow,
 		events.EventTypeRandInt,
 		events.EventTypeFinish,
@@ -540,7 +539,7 @@ def main(ctx, input):
 
 	// Verify the event sequence includes the deterministic calls before yield
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeTimeNow,
 		events.EventTypeRandInt,
 		events.EventTypeCall,
@@ -618,7 +617,7 @@ def main(ctx, input):
 
 	// Verify the event sequence
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeCall, events.EventTypeReturn, // pre-yield call
 		events.EventTypeCall, events.EventTypeYield, // yield call
 		events.EventTypeResume,
@@ -675,11 +674,11 @@ def main(ctx, input):
 	// Verify we have the key events
 	runEvents, err := s.client.GetEvents(context.Background(), runID)
 	s.Require().NoError(err)
-	s.Require().GreaterOrEqual(len(runEvents), 4, "Should have at least claim, call, yield, and finish events")
+	s.Require().GreaterOrEqual(len(runEvents), 5, "Should have at least start, claim, call, yield, and finish events")
 
 	// Verify we have the key events in the right order
-	s.Require().Equal(events.EventTypeClaim, runEvents[0].Type())
-	s.Require().Equal(events.EventTypeCall, runEvents[1].Type())
+	s.Require().Equal(events.EventTypeStart, runEvents[0].Type())
+	s.Require().Equal(events.EventTypeClaim, runEvents[1].Type())
 
 	// Find yield event
 	foundYield := false
@@ -713,7 +712,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "StringValue: test string value, Input: hello world")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeFinish,
 	)
 }
@@ -951,7 +950,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "Int32Value: 42, Input: hello world")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeFinish,
 	)
 }
@@ -976,7 +975,7 @@ def main(ctx, input):
 	s.Require().Contains(run.Output.String(), "Timestamp:")
 	s.Require().Contains(run.Output.String(), "hello world")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeTimeNow,
 		events.EventTypeFinish,
 	)
@@ -1000,7 +999,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "Duration: 5s 1000000ns, Input: hello world")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeFinish,
 	)
 }
@@ -1023,7 +1022,7 @@ def main(ctx, input):
 	s.assertRunStatus(runID, starflow.RunStatusCompleted)
 	s.assertRunOutput(run, "BoolValue: True, Input: hello world")
 	s.assertEventSequence(runID,
-		events.EventTypeClaim,
+		events.EventTypeStart, events.EventTypeClaim,
 		events.EventTypeFinish,
 	)
 }
