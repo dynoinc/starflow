@@ -31,15 +31,14 @@ type trace struct {
 }
 
 func newTrace(runID string, store Store, events []*Event) *trace {
-	var lastEvent EventMetadata
+	lastEvent := EventMetadata(nil)
 	if len(events) > 0 {
 		lastEvent = events[len(events)-1].Metadata
 	}
 
 	return &trace{
-		runID: runID,
-		store: store,
-
+		runID:       runID,
+		store:       store,
 		events:      events,
 		nextEventID: len(events),
 		lastEvent:   lastEvent,
@@ -137,13 +136,13 @@ func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) erro
 		Metadata:  event,
 	}
 
-	// Serialize the event to bytes
+	// Serialize to bytes - normalization happens automatically in JSON marshaling
 	eventData, err := json.Marshal(newEvent)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Delegate to simplified store with OCC
+	// Delegate to store with OCC
 	nextEventID, err := t.store.AppendEvent(ctx, t.runID, t.nextEventID, eventData)
 	if err != nil {
 		return fmt.Errorf("failed to record event: %w", err)
@@ -329,6 +328,7 @@ func runThread[Input any, Output any](
 	}
 
 	// Convert byte slices back to Event structs
+	// Events from storage are already normalized because they went through JSON marshaling
 	eventList := make([]*Event, len(eventDataList))
 	for i, eventData := range eventDataList {
 		var event Event
@@ -355,6 +355,7 @@ func runThread[Input any, Output any](
 			if module == "rand" {
 				members := make(starlark.StringDict)
 				members["int"] = makeRandIntBuiltin(t)
+				members.Freeze()
 				return members, nil
 			}
 			if module == "math" {
@@ -392,18 +393,17 @@ func runThread[Input any, Output any](
 	ctxWithRunID := withRunID(ctx, runID)
 	starlarkCtx := &starlarkContext{ctx: ctxWithRunID}
 
-	starlarkInput, err := jsonToStarlark(input)
-	if err != nil {
-		return zero, fmt.Errorf("failed to convert input to starlark: %w", err)
-	}
-
-	// Record start event with input - normalize input through JSON to ensure consistency
-	// between recording and replay (structs become maps when serialized/deserialized)
-	normalizedInput, err := normalizeInput(input)
+	normalizedInput, err := normalizeData(input)
 	if err != nil {
 		return zero, fmt.Errorf("failed to normalize input: %w", err)
 	}
 
+	starlarkInput, err := jsonToStarlark(normalizedInput)
+	if err != nil {
+		return zero, fmt.Errorf("failed to convert input to starlark: %w", err)
+	}
+
+	// Record start event
 	scriptHash := sha256.Sum256(script)
 	if err := recordEvent(ctxWithRunID, t, NewStartEvent(hex.EncodeToString(scriptHash[:]), normalizedInput)); err != nil {
 		return zero, fmt.Errorf("failed to record start event: %w", err)
@@ -450,28 +450,6 @@ func runThread[Input any, Output any](
 	}
 
 	return output, nil
-}
-
-// normalizeInput converts input to its JSON-serialized form to ensure consistency
-// between recording and replay. This prevents struct types from becoming maps during
-// JSON serialization/deserialization cycles.
-func normalizeInput(input any) (any, error) {
-	if input == nil {
-		return nil, nil
-	}
-
-	// Convert to JSON and back to normalize the representation
-	jsonBytes, err := json.Marshal(input)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal input: %w", err)
-	}
-
-	var normalized any
-	if err := json.Unmarshal(jsonBytes, &normalized); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal input: %w", err)
-	}
-
-	return normalized, nil
 }
 
 // Helper functions for Starlark <-> JSON conversion

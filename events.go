@@ -28,10 +28,10 @@ type EventMetadata interface {
 	EventType() EventType
 }
 
-// CallEvent metadata - now uses any for maximum flexibility
+// CallEvent metadata
 type CallEvent struct {
 	functionName string
-	input        any // Can be any JSON-serializable value
+	input        any
 }
 
 func NewCallEvent(functionName string, input any) CallEvent {
@@ -43,9 +43,18 @@ func (c CallEvent) FunctionName() string { return c.functionName }
 func (c CallEvent) Input() any           { return c.input }
 
 func (c CallEvent) MarshalJSON() ([]byte, error) {
+	normalizedInput := c.input
+	if c.input != nil {
+		normalized, err := normalizeData(c.input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize call event input: %w", err)
+		}
+		normalizedInput = normalized
+	}
+
 	return json.Marshal(map[string]any{
 		"functionName": c.functionName,
-		"input":        c.input,
+		"input":        normalizedInput,
 	})
 }
 
@@ -62,9 +71,9 @@ func (c *CallEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// ReturnEvent metadata - now uses any for maximum flexibility
+// ReturnEvent metadata
 type ReturnEvent struct {
-	output any // Can be any JSON-serializable value
+	output any
 	err    error
 }
 
@@ -80,8 +89,18 @@ func (r ReturnEvent) MarshalJSON() ([]byte, error) {
 	if r.err != nil {
 		errStr = r.err.Error()
 	}
+
+	normalizedOutput := r.output
+	if r.output != nil {
+		normalized, err := normalizeData(r.output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize return event output: %w", err)
+		}
+		normalizedOutput = normalized
+	}
+
 	return json.Marshal(map[string]any{
-		"output": r.output,
+		"output": normalizedOutput,
 		"error":  errStr,
 	})
 }
@@ -237,9 +256,18 @@ func (r ResumeEvent) SignalID() string     { return r.signalID }
 func (r ResumeEvent) Output() any          { return r.output }
 
 func (r ResumeEvent) MarshalJSON() ([]byte, error) {
+	normalizedOutput := r.output
+	if r.output != nil {
+		normalized, err := normalizeData(r.output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize resume event output: %w", err)
+		}
+		normalizedOutput = normalized
+	}
+
 	return json.Marshal(map[string]any{
 		"signalID": r.signalID,
-		"output":   r.output,
+		"output":   normalizedOutput,
 	})
 }
 
@@ -256,9 +284,9 @@ func (r *ResumeEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// FinishEvent - now uses any for maximum flexibility
+// FinishEvent
 type FinishEvent struct {
-	output any // Can be any JSON-serializable value
+	output any
 	err    error
 }
 
@@ -274,8 +302,18 @@ func (f FinishEvent) MarshalJSON() ([]byte, error) {
 	if f.err != nil {
 		errStr = f.err.Error()
 	}
+
+	normalizedOutput := f.output
+	if f.output != nil {
+		normalized, err := normalizeData(f.output)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize finish event output: %w", err)
+		}
+		normalizedOutput = normalized
+	}
+
 	return json.Marshal(map[string]any{
-		"output": f.output,
+		"output": normalizedOutput,
 		"error":  errStr,
 	})
 }
@@ -295,10 +333,10 @@ func (f *FinishEvent) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// StartEvent metadata - now uses any for maximum flexibility
+// StartEvent metadata
 type StartEvent struct {
 	scriptHash string
-	input      any // Can be any JSON-serializable value
+	input      any
 }
 
 func NewStartEvent(scriptHash string, input any) StartEvent {
@@ -310,9 +348,18 @@ func (s StartEvent) ScriptHash() string   { return s.scriptHash }
 func (s StartEvent) Input() any           { return s.input }
 
 func (s StartEvent) MarshalJSON() ([]byte, error) {
+	normalizedInput := s.input
+	if s.input != nil {
+		normalized, err := normalizeData(s.input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to normalize start event input: %w", err)
+		}
+		normalizedInput = normalized
+	}
+
 	return json.Marshal(map[string]any{
 		"scriptHash": s.scriptHash,
-		"input":      s.input,
+		"input":      normalizedInput,
 	})
 }
 
@@ -428,4 +475,26 @@ func (e *Event) UnmarshalJSON(data []byte) error {
 	}
 
 	return nil
+}
+
+// normalizeData converts data to its JSON-serialized form to ensure consistency
+// between recording and replay. This prevents struct types from becoming maps during
+// JSON serialization/deserialization cycles.
+func normalizeData(data any) (any, error) {
+	if data == nil {
+		return nil, nil
+	}
+
+	// Convert to JSON and back to normalize the representation
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal data: %w", err)
+	}
+
+	var normalized any
+	if err := json.Unmarshal(jsonBytes, &normalized); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal data: %w", err)
+	}
+
+	return normalized, nil
 }
