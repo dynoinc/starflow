@@ -26,66 +26,17 @@ go get github.com/dynoinc/starflow
 
 ## Quick Start
 
-```go
-package main
+For a complete working example, please see the [`example_test.go`](example_test.go) file in this repository. It demonstrates how to:
 
-import (
-    "context"
-    
-    "github.com/dynoinc/starflow"
-    "google.golang.org/protobuf/types/known/wrapperspb"
-)
+- Create an in-memory store
+- Register functions for use in workflows
+- Define workflow scripts using Starlark
+- Execute workflows and retrieve results
 
-func main() {
-    // Create an in-memory store
-    store := starflow.NewInMemoryStore()
-    
-    // Create a worker
-    worker := starflow.NewWorker[*wrapperspb.StringValue](store)
-    
-    // Register your functions
-    echoFn := func(ctx context.Context, req *wrapperspb.StringValue) (*wrapperspb.StringValue, error) {
-        return &wrapperspb.StringValue{Value: "echo: " + req.Value}, nil
-    }
-    starflow.Register(worker, echoFn, starflow.WithName("module.echoFn"))
-    
-    // Create a client
-    client := starflow.NewClient[*wrapperspb.StringValue](store)
-    
-    // Define your workflow script
-    script := `
-load("proto", "proto")
+You can run the example with:
 
-def main(ctx, input):
-    # Use well-known protobuf types
-    stringvalue_proto = proto.file("google/protobuf/wrappers.proto")
-    
-    # Call our registered function
-    result = module.echoFn(ctx=ctx, req=stringvalue_proto.StringValue(value=input.value))
-    
-    # Return the result
-    return result
-`
-    
-    // Run the workflow
-    runID, err := client.Run(context.Background(), []byte(script), &wrapperspb.StringValue{Value: "hello"})
-    if err != nil {
-        panic(err)
-    }
-    
-    // Process the workflow
-    worker.ProcessOnce(context.Background())
-    
-    // Get the result
-    run, err := client.GetRun(context.Background(), runID)
-    if err != nil {
-        panic(err)
-    }
-    
-    var output wrapperspb.StringValue
-    run.Output.UnmarshalTo(&output)
-    println("Result:", output.Value)
-}
+```bash
+go test -run Example
 ```
 
 ## License
