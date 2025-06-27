@@ -665,6 +665,40 @@ def main(ctx, input):
 	s.Contains(output.Message, "1s")
 }
 
+// Test that context from client is passed to registered functions
+func (s *WorkflowTestSuite) TestContextPassedToRegisteredFunctions() {
+	// Register a function that extracts information from the context
+	contextTestFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		// Extract run ID from context to verify it's the correct context
+		runID, ok := starflow.GetRunID(ctx)
+		if !ok {
+			return PingResponse{}, fmt.Errorf("no run ID found in context")
+		}
+
+		// Check for the test value in context
+		testValue := ctx.Value(WorkflowTestSuite{})
+		if testValue == nil {
+			return PingResponse{}, fmt.Errorf("no WorkflowTestSuite found in context")
+		}
+
+		return PingResponse{Message: fmt.Sprintf("context_test_passed_runid_%s", runID)}, nil
+	}
+
+	s.registerFunction("test.ContextTest", contextTestFn)
+
+	script := `
+def main(ctx, input):
+    result = test.ContextTest(ctx=ctx, req={"message": input["message"]})
+    return {"message": result["message"]}
+`
+
+	runID := "context-test-run-123"
+	ctx := context.WithValue(context.Background(), WorkflowTestSuite{}, "fake-value")
+	output, err := s.client.Run(ctx, runID, []byte(script), PingRequest{Message: "test"})
+	s.Require().NoError(err)
+	s.Contains(output.Message, "context_test_passed_runid_"+runID)
+}
+
 func TestWorkflowTestSuite(t *testing.T) {
 	suite.Run(t, new(WorkflowTestSuite))
 }

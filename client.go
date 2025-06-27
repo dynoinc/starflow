@@ -177,8 +177,8 @@ func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, o
 // Context key for runID
 type runIDKey struct{}
 
-// WithRunID adds runID to the context
-func WithRunID(ctx context.Context, runID string) context.Context {
+// withRunID is an internal alias for WithRunID
+func withRunID(ctx context.Context, runID string) context.Context {
 	return context.WithValue(ctx, runIDKey{}, runID)
 }
 

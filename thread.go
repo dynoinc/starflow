@@ -302,7 +302,7 @@ func runThread[Input any, Output any](
 	}
 
 	// Create starlark context and convert input to Starlark value
-	ctxWithRunID := WithRunID(ctx, runID)
+	ctxWithRunID := withRunID(ctx, runID)
 	starlarkCtx := &starlarkContext{ctx: ctxWithRunID}
 
 	starlarkInput, err := jsonToStarlark(input)
