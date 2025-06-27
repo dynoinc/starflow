@@ -162,19 +162,40 @@ func (c *Client[Input, Output]) Run(ctx context.Context, runID string, script []
 // GetEvents retrieves the execution history of a workflow run.
 // Returns a chronological list of events that occurred during execution.
 func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
-	return c.store.GetEvents(ctx, runID)
+	eventDataList, err := c.store.GetEvents(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert byte slices back to Event structs
+	events := make([]*Event, len(eventDataList))
+	for i, eventData := range eventDataList {
+		var event Event
+		if err := json.Unmarshal(eventData, &event); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal event %d: %w", i, err)
+		}
+		events[i] = &event
+	}
+
+	return events, nil
 }
 
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
 func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output any) error {
-	lastEvent, version, err := c.store.GetLastEvent(ctx, runID)
+	lastEventData, version, err := c.store.GetLastEvent(ctx, runID)
 	if err != nil {
 		return err
 	}
 
-	if lastEvent == nil {
+	if lastEventData == nil {
 		return fmt.Errorf("no last event found for run %s", runID)
+	}
+
+	// Deserialize the last event
+	var lastEvent Event
+	if err := json.Unmarshal(lastEventData, &lastEvent); err != nil {
+		return fmt.Errorf("failed to unmarshal last event: %w", err)
 	}
 
 	resumeEvent := NewResumeEvent(cid, output)
@@ -188,7 +209,13 @@ func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, o
 		return err
 	}
 
-	_, err = c.store.AppendEvent(ctx, runID, version, event)
+	// Serialize the new event
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
+	_, err = c.store.AppendEvent(ctx, runID, version, eventData)
 	return err
 }
 

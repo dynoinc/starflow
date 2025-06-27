@@ -10,7 +10,7 @@ import (
 // All data is stored in memory and will be lost when the process terminates.
 type InMemoryStore struct {
 	mu     sync.RWMutex
-	events map[string][]*Event
+	events map[string][][]byte
 }
 
 // NewInMemoryStore creates a new InMemoryStore.
@@ -18,12 +18,12 @@ type InMemoryStore struct {
 // or single-instance workflow execution.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		events: make(map[string][]*Event),
+		events: make(map[string][][]byte),
 	}
 }
 
 // AppendEvent appends an event to a run's history with optimistic concurrency control.
-func (s *InMemoryStore) AppendEvent(ctx context.Context, runID string, expectedVersion int, event *Event) (int, error) {
+func (s *InMemoryStore) AppendEvent(ctx context.Context, runID string, expectedVersion int, eventData []byte) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -35,27 +35,30 @@ func (s *InMemoryStore) AppendEvent(ctx context.Context, runID string, expectedV
 		return 0, ErrConcurrentUpdate
 	}
 
-	// Append the event
-	s.events[runID] = append(s.events[runID], event)
+	// Append the event data
+	s.events[runID] = append(s.events[runID], eventData)
 
 	return currentVersion + 1, nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
-func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*Event, error) {
+func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([][]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	runEvents := s.events[runID]
 
 	// Return a copy to avoid external modifications
-	result := make([]*Event, len(runEvents))
-	copy(result, runEvents)
+	result := make([][]byte, len(runEvents))
+	for i, eventData := range runEvents {
+		result[i] = make([]byte, len(eventData))
+		copy(result[i], eventData)
+	}
 	return result, nil
 }
 
 // GetLastEvent returns the last event for a given run.
-func (s *InMemoryStore) GetLastEvent(ctx context.Context, runID string) (*Event, int, error) {
+func (s *InMemoryStore) GetLastEvent(ctx context.Context, runID string) ([]byte, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -64,5 +67,10 @@ func (s *InMemoryStore) GetLastEvent(ctx context.Context, runID string) (*Event,
 		return nil, 0, nil
 	}
 
-	return runEvents[len(runEvents)-1], len(runEvents), nil
+	lastEventData := runEvents[len(runEvents)-1]
+	// Return a copy to avoid external modifications
+	result := make([]byte, len(lastEventData))
+	copy(result, lastEventData)
+
+	return result, len(runEvents), nil
 }

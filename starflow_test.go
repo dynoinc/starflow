@@ -2,6 +2,7 @@ package starflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -710,7 +711,11 @@ func TestInMemoryStoreBasics(t *testing.T) {
 		Metadata:  NewStartEvent("script-hash", nil),
 	}
 
-	version, err := store.AppendEvent(ctx, "run1", 0, event1)
+	// Serialize event to bytes
+	event1Data, err := json.Marshal(event1)
+	require.NoError(t, err)
+
+	version, err := store.AppendEvent(ctx, "run1", 0, event1Data)
 	require.NoError(t, err)
 	require.Equal(t, 1, version)
 
@@ -720,21 +725,33 @@ func TestInMemoryStoreBasics(t *testing.T) {
 		Metadata:  NewCallEvent("fn", nil),
 	}
 
+	// Serialize event to bytes
+	event2Data, err := json.Marshal(event2)
+	require.NoError(t, err)
+
 	// Should fail with wrong version
-	_, err = store.AppendEvent(ctx, "run1", 0, event2)
+	_, err = store.AppendEvent(ctx, "run1", 0, event2Data)
 	require.ErrorIs(t, err, ErrConcurrentUpdate)
 
 	// Should succeed with correct version
-	version, err = store.AppendEvent(ctx, "run1", 1, event2)
+	version, err = store.AppendEvent(ctx, "run1", 1, event2Data)
 	require.NoError(t, err)
 	require.Equal(t, 2, version)
 
 	// Test GetEvents
-	events, err := store.GetEvents(ctx, "run1")
+	eventDataList, err := store.GetEvents(ctx, "run1")
 	require.NoError(t, err)
-	require.Len(t, events, 2)
-	require.Equal(t, EventTypeStart, events[0].Type())
-	require.Equal(t, EventTypeCall, events[1].Type())
+	require.Len(t, eventDataList, 2)
+
+	// Deserialize events to verify types
+	var retrievedEvent1, retrievedEvent2 Event
+	err = json.Unmarshal(eventDataList[0], &retrievedEvent1)
+	require.NoError(t, err)
+	err = json.Unmarshal(eventDataList[1], &retrievedEvent2)
+	require.NoError(t, err)
+
+	require.Equal(t, EventTypeStart, retrievedEvent1.Type())
+	require.Equal(t, EventTypeCall, retrievedEvent2.Type())
 }
 
 func TestValidateInvariants(t *testing.T) {

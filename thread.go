@@ -114,31 +114,37 @@ func validateInvariants(runID string, lastEvent EventMetadata, newEvent EventMet
 }
 
 func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) error {
+	// If we have existing events (replay mode), validate against them
 	if expected, ok := popEvent[ET](t); ok {
 		if !reflect.DeepEqual(expected, event) {
 			return fmt.Errorf("event mismatch: expected %+v, got %+v", expected, event)
 		}
-
 		return nil
 	}
 
+	// If we're in recording mode, ensure we've consumed all events
 	if len(t.events) != 0 {
 		return fmt.Errorf("trying to record event %s, but there are %d events left in the trace", event.EventType(), len(t.events))
 	}
 
-	// Validate invariants at the package level
+	// Check invariants first
 	if err := validateInvariants(t.runID, t.lastEvent, event); err != nil {
 		return err
 	}
 
-	// Create the event
 	newEvent := &Event{
 		Timestamp: time.Now(),
 		Metadata:  event,
 	}
 
+	// Serialize the event to bytes
+	eventData, err := json.Marshal(newEvent)
+	if err != nil {
+		return fmt.Errorf("failed to marshal event: %w", err)
+	}
+
 	// Delegate to simplified store with OCC
-	nextEventID, err := t.store.AppendEvent(ctx, t.runID, t.nextEventID, newEvent)
+	nextEventID, err := t.store.AppendEvent(ctx, t.runID, t.nextEventID, eventData)
 	if err != nil {
 		return fmt.Errorf("failed to record event: %w", err)
 	}
@@ -317,9 +323,19 @@ func runThread[Input any, Output any](
 	input Input,
 ) (Output, error) {
 	var zero Output
-	eventList, err := c.store.GetEvents(ctx, runID)
+	eventDataList, err := c.store.GetEvents(ctx, runID)
 	if err != nil {
 		return zero, fmt.Errorf("failed to get events: %w", err)
+	}
+
+	// Convert byte slices back to Event structs
+	eventList := make([]*Event, len(eventDataList))
+	for i, eventData := range eventDataList {
+		var event Event
+		if err := json.Unmarshal(eventData, &event); err != nil {
+			return zero, fmt.Errorf("failed to unmarshal event %d: %w", i, err)
+		}
+		eventList[i] = &event
 	}
 
 	t := newTrace(runID, c.store, eventList)
@@ -381,9 +397,15 @@ func runThread[Input any, Output any](
 		return zero, fmt.Errorf("failed to convert input to starlark: %w", err)
 	}
 
-	// Record start event with input
+	// Record start event with input - normalize input through JSON to ensure consistency
+	// between recording and replay (structs become maps when serialized/deserialized)
+	normalizedInput, err := normalizeInput(input)
+	if err != nil {
+		return zero, fmt.Errorf("failed to normalize input: %w", err)
+	}
+
 	scriptHash := sha256.Sum256(script)
-	if err := recordEvent(ctxWithRunID, t, NewStartEvent(hex.EncodeToString(scriptHash[:]), input)); err != nil {
+	if err := recordEvent(ctxWithRunID, t, NewStartEvent(hex.EncodeToString(scriptHash[:]), normalizedInput)); err != nil {
 		return zero, fmt.Errorf("failed to record start event: %w", err)
 	}
 
@@ -428,6 +450,28 @@ func runThread[Input any, Output any](
 	}
 
 	return output, nil
+}
+
+// normalizeInput converts input to its JSON-serialized form to ensure consistency
+// between recording and replay. This prevents struct types from becoming maps during
+// JSON serialization/deserialization cycles.
+func normalizeInput(input any) (any, error) {
+	if input == nil {
+		return nil, nil
+	}
+
+	// Convert to JSON and back to normalize the representation
+	jsonBytes, err := json.Marshal(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal input: %w", err)
+	}
+
+	var normalized any
+	if err := json.Unmarshal(jsonBytes, &normalized); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal input: %w", err)
+	}
+
+	return normalized, nil
 }
 
 // Helper functions for Starlark <-> JSON conversion

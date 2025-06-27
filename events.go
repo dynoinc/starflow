@@ -338,3 +338,94 @@ type Event struct {
 func (e Event) Type() EventType {
 	return e.Metadata.EventType()
 }
+
+// MarshalJSON serializes the Event to JSON
+func (e Event) MarshalJSON() ([]byte, error) {
+	// Create a struct that includes the event type for proper deserialization
+	return json.Marshal(struct {
+		Timestamp time.Time   `json:"timestamp"`
+		Type      EventType   `json:"type"`
+		Metadata  interface{} `json:"metadata"`
+	}{
+		Timestamp: e.Timestamp,
+		Type:      e.Metadata.EventType(),
+		Metadata:  e.Metadata,
+	})
+}
+
+// UnmarshalJSON deserializes JSON into an Event
+func (e *Event) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		Timestamp time.Time       `json:"timestamp"`
+		Type      EventType       `json:"type"`
+		Metadata  json.RawMessage `json:"metadata"`
+	}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+
+	e.Timestamp = aux.Timestamp
+
+	// Unmarshal metadata based on type
+	switch aux.Type {
+	case EventTypeStart:
+		var metadata StartEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeFinish:
+		var metadata FinishEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeCall:
+		var metadata CallEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeReturn:
+		var metadata ReturnEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeYield:
+		var metadata YieldEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeResume:
+		var metadata ResumeEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeSleep:
+		var metadata SleepEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeTimeNow:
+		var metadata TimeNowEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	case EventTypeRandInt:
+		var metadata RandIntEvent
+		if err := json.Unmarshal(aux.Metadata, &metadata); err != nil {
+			return err
+		}
+		e.Metadata = metadata
+	default:
+		return fmt.Errorf("unknown event type: %s", aux.Type)
+	}
+
+	return nil
+}
