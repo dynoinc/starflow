@@ -115,5 +115,12 @@ func (c *Client[Input]) GetEvents(ctx context.Context, runID string) ([]*events.
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
 func (c *Client[Input]) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
-	return c.store.Signal(ctx, runID, cid, output)
+	run, err := c.store.GetRun(ctx, runID)
+	if err != nil {
+		return err
+	}
+
+	resumeEvent := events.NewResumeEvent(cid, output)
+	_, err = c.store.RecordEvent(ctx, runID, run.NextEventID, resumeEvent)
+	return err
 }

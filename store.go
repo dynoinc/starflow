@@ -39,17 +39,10 @@ type Store interface {
 	//   - Running -> Yielded (via Yield event)
 	//   - Running -> Failed (via Return event with error)
 	//   - Running -> Completed (via Finish event)
-	//   - Yielded -> Pending (via Signal method)
+	//   - Yielded -> Pending (via Resume event)
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimRuns(ctx context.Context, workerID string, leaseUntil time.Time) ([]*Run, error)
-
-	// Signals - Methods to signal a run.
-	//
-	// Invariants:
-	// - Signaling a run with a non-existent run ID or a non-existent signal ID succeeds silently.
-	// - Run will be updated to be in status RunStatusPending.
-	Signal(ctx context.Context, runID, cid string, output *anypb.Any) error
 
 	// Events - Methods to record events.
 	//
@@ -64,7 +57,9 @@ type Store interface {
 	//   - Its current status is RunStatusPending.
 	//   - Its current status is RunStatusRunning AND it is already leased by the same worker (for lease renewal).
 	//   - Its current status is RunStatusRunning AND its lease has expired.
-	// - Upon a successful claim event, the run's LeasedBy field is set to the claiming worker's ID and LeasedUntil is set to the provided lease expiry timestamp.
+	//   Upon a successful claim event, the run's LeasedBy field is set to the claiming worker's ID and LeasedUntil is set to the provided lease expiry timestamp.
+	// - If event is a resume event, run must be in RunStatusYielded and signal ID must exist; run is updated to RunStatusPending and signal is removed.
+	// - For all events, the run must be in the correct state for the event type, as per the allowed state transitions.
 	RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error)
 	GetEvents(ctx context.Context, runID string) ([]*events.Event, error)
 }

@@ -877,7 +877,7 @@ func (s *WorkflowTestSuite) TestWorkflow_SignalNonExistentRunID() {
 	s.Require().NoError(err)
 
 	err = s.client.Signal(context.Background(), "non-existent-run-id", "non-existent-cid", outputAny)
-	s.Require().NoError(err) // Should succeed silently as per interface contract
+	s.Require().Error(err)
 }
 
 // TestWorkflow_SignalNonExistentCID tests signaling a non-existent cid for a yielded run.
@@ -909,7 +909,7 @@ def main(ctx, input):
 	s.Require().NoError(err)
 
 	err = s.client.Signal(context.Background(), capturedRunID, "non-existent-cid", outputAny)
-	s.Require().NoError(err) // Should succeed silently as per interface contract
+	s.Require().Error(err)
 }
 
 // TestWorkflow_SignalNonYieldedRun tests signaling a run that is not in RunStatusYielded.
@@ -930,7 +930,7 @@ def main(ctx, input):
 	s.Require().NoError(err)
 
 	err = s.client.Signal(context.Background(), runID, "some-cid", outputAny)
-	s.Require().NoError(err) // Should succeed silently as per interface contract
+	s.Require().Error(err)
 }
 
 // TestWorkflow_Int32Value tests the use of google.protobuf.Int32Value well-known type.

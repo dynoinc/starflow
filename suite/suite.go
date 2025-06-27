@@ -94,6 +94,10 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, events.NewCallEvent("fn", nil))
 		require.NoError(t, err)
 		require.Equal(t, int64(1), nextEventID)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), run.NextEventID)
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
@@ -110,12 +114,19 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+
+		// First event should succeed
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewCallEvent("fn", nil))
 		require.NoError(t, err)
 
+		// Second event with same NextEventID should fail with ErrConcurrentUpdate
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewCallEvent("fn", nil))
-		require.Error(t, err)
-		require.Equal(t, err, starflow.ErrConcurrentUpdate)
+		require.ErrorIs(t, err, starflow.ErrConcurrentUpdate)
 	})
 
 	t.Run("RecordEventWithInvalidRunID", func(t *testing.T) {
@@ -137,6 +148,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
+
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), run.NextEventID)
 
 		testError := errors.New("test error")
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewReturnEvent(nil, testError))
@@ -163,6 +181,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, int64(1), run.NextEventID)
+
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewYieldEvent("test-signal-id", id))
 		require.NoError(t, err)
 
@@ -185,12 +210,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
-		_, err = s.RecordEvent(
-			ctx,
-			id,
-			run.NextEventID,
-			events.NewClaimEvent("test-worker", time.Now().Add(10*time.Second)),
-		)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("test-worker", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
@@ -216,10 +236,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker1", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
 
-		// Second claim should fail due to optimistic concurrency
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+
+		// Second claim should fail due to invalid state transition
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker2", time.Now().Add(10*time.Second)))
 		require.Error(t, err)
-		require.Equal(t, err, starflow.ErrConcurrentUpdate)
+		require.Contains(t, err.Error(), "invalid state transition: claim event not allowed from current state")
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
@@ -294,6 +317,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
+		// Move to Running
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewFinishEvent(output, nil))
 		require.NoError(t, err)
@@ -316,6 +346,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, id)
+		require.NoError(t, err)
+
+		// Move to Running
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
 
 		testError := errors.New("test finish error")
@@ -343,6 +380,13 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
 
+		// Move to Running
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+
 		// Record multiple events
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewCallEvent("fn1", nil))
 		require.NoError(t, err)
@@ -362,10 +406,11 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		// Get all events
 		runEvents, err := s.GetEvents(ctx, id)
 		require.NoError(t, err)
-		require.Len(t, runEvents, 3)
-		require.Equal(t, events.EventTypeCall, runEvents[0].Type())
+		require.Len(t, runEvents, 4)
+		require.Equal(t, events.EventTypeClaim, runEvents[0].Type())
 		require.Equal(t, events.EventTypeCall, runEvents[1].Type())
-		require.Equal(t, events.EventTypeReturn, runEvents[2].Type())
+		require.Equal(t, events.EventTypeCall, runEvents[2].Type())
+		require.Equal(t, events.EventTypeReturn, runEvents[3].Type())
 	})
 
 	t.Run("SignalInvariants", func(t *testing.T) {
@@ -378,20 +423,23 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Test 1: Signaling with non-existent run ID succeeds silently
 		output, _ := anypb.New(&testpb.PingResponse{Message: "test output"})
-		err = s.Signal(ctx, "non-existent-run-id", "non-existent-signal-id", output)
-		require.NoError(t, err, "signaling with non-existent run ID should succeed silently")
+		_, err = s.RecordEvent(ctx, "non-existent-run-id", 0, events.NewResumeEvent("non-existent-signal-id", output))
+		require.Error(t, err, "signaling with non-existent run ID should return error")
 
 		// Test 2: Signaling with non-existent signal ID succeeds silently
 		id, err := s.CreateRun(ctx, scriptHash, nil)
 		require.NoError(t, err)
 
-		err = s.Signal(ctx, id, "non-existent-signal-id", output)
-		require.NoError(t, err, "signaling with non-existent signal ID should succeed silently")
-
-		// Test 3: Signaling a valid run updates status to RunStatusPending
+		// Move to Running
 		run, err := s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.Equal(t, starflow.RunStatusPending, run.Status, "run status should be updated to RunStatusPending after signal")
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
+		require.NoError(t, err)
+
+		// Should be in running state, so yield event is valid
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusRunning, run.Status, "run status should be running before yield")
 
 		// Test 4: Signaling a yielded run with valid signal ID
 		run, err = s.GetRun(ctx, id)
@@ -405,12 +453,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 		require.Equal(t, starflow.RunStatusYielded, run.Status)
 
-		// Signal the yielded run
-		err = s.Signal(ctx, id, "test-signal-id", output)
+		// Signal the yielded run (resume event)
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewResumeEvent("test-signal-id", output))
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.Equal(t, starflow.RunStatusPending, run.Status, "yielded run should be updated to RunStatusPending after signal")
+		require.Equal(t, starflow.RunStatusPending, run.Status, "yielded run should be updated to RunStatusPending after signal/resume event")
 	})
 }

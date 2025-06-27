@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -147,7 +148,8 @@ func (s *InMemoryStore) ClaimRuns(ctx context.Context, workerID string, leaseUnt
 	return claimedRuns, nil
 }
 
-// RecordEvent records an event. It succeeds only if run.NextEventID==expectedNextID.
+// RecordEvent records an event.
+// It succeeds only if run.NextEventID==expectedNextID and the run is in the correct state for the event type.
 // On success the store increments NextEventID by one.
 func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int64, eventMetadata events.EventMetadata) (int64, error) {
 	s.mu.Lock()
@@ -163,6 +165,41 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		return 0, ErrConcurrentUpdate
 	}
 
+	// State transition checks
+	switch eventMetadata.EventType() {
+	case events.EventTypeClaim:
+		if !(storedRun.Status == RunStatusPending ||
+			(storedRun.Status == RunStatusRunning && storedRun.LeasedUntil.Before(time.Now())) ||
+			(storedRun.Status == RunStatusRunning && storedRun.LeasedBy == eventMetadata.(events.ClaimEvent).WorkerID())) {
+			return 0, errors.New("invalid state transition: claim event not allowed from current state")
+		}
+	case events.EventTypeYield:
+		if storedRun.Status != RunStatusRunning {
+			return 0, errors.New("invalid state transition: yield event only allowed from running state")
+		}
+	case events.EventTypeReturn:
+		if storedRun.Status != RunStatusRunning {
+			return 0, errors.New("invalid state transition: return event only allowed from running state")
+		}
+	case events.EventTypeFinish:
+		if storedRun.Status != RunStatusRunning {
+			return 0, errors.New("invalid state transition: finish event only allowed from running state")
+		}
+	case events.EventTypeResume:
+		resumeEvent, ok := eventMetadata.(events.ResumeEvent)
+		if !ok {
+			return 0, errors.New("invalid resume event metadata")
+		}
+		signalID := resumeEvent.SignalID()
+		if storedRun.Status != RunStatusYielded {
+			return 0, errors.New("invalid state transition: resume event only allowed from yielded state")
+		}
+		runIDForSignal, signalExists := s.yields[signalID]
+		if !signalExists || runIDForSignal != runID {
+			return 0, errors.New("invalid resume event: signal ID does not exist")
+		}
+	}
+
 	// Add event to the list
 	event := &events.Event{
 		Timestamp: time.Now(),
@@ -172,7 +209,7 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	s.events[runID] = append(s.events[runID], event)
 
 	// Update the runs
-	switch event.Type() {
+	switch eventMetadata.EventType() {
 	case events.EventTypeReturn:
 		if returnEvent, ok := event.Metadata.(events.ReturnEvent); ok {
 			_, err := returnEvent.Output()
@@ -203,43 +240,16 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 			storedRun.LeasedBy = claimEvent.WorkerID()
 			storedRun.LeasedUntil = claimEvent.Until()
 		}
+	case events.EventTypeResume:
+		if resumeEvent, ok := event.Metadata.(events.ResumeEvent); ok {
+			storedRun.Status = RunStatusPending
+			delete(s.yields, resumeEvent.SignalID())
+		}
 	}
 
 	storedRun.NextEventID++
 	storedRun.UpdatedAt = time.Now()
 	return storedRun.NextEventID, nil
-}
-
-// Signal resumes a yielded workflow with the given output.
-func (s *InMemoryStore) Signal(ctx context.Context, runID, cid string, output *anypb.Any) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Check if run exists
-	run, exists := s.runs[runID]
-	if !exists {
-		// Invariant: Signaling with non-existent run ID succeeds silently
-		return nil
-	}
-
-	// Check if signal exists
-	_, signalExists := s.yields[cid]
-	if !signalExists {
-		// Invariant: Signaling with non-existent signal ID succeeds silently
-		return nil
-	}
-
-	// Valid signal - add resume event and update run
-	s.events[runID] = append(s.events[runID], &events.Event{
-		Metadata: events.NewResumeEvent(cid, output),
-	})
-
-	run.NextEventID++
-	run.Status = RunStatusPending
-	run.UpdatedAt = time.Now()
-
-	delete(s.yields, cid)
-	return nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.
