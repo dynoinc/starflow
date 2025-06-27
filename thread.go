@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"reflect"
 	"strings"
 	"time"
 
@@ -41,20 +40,6 @@ func newTrace(runID string, store Store, events []*events.Event) *trace {
 	}
 }
 
-func peekEvent[ET events.EventMetadata](t *trace) (ET, bool) {
-	var zero ET
-	if len(t.events) == 0 {
-		return zero, false
-	}
-
-	nextEvent := t.events[0]
-	if nextEvent.Type() != zero.EventType() {
-		return zero, false
-	}
-
-	return nextEvent.Metadata.(ET), true
-}
-
 func popEvent[ET events.EventMetadata](t *trace) (ET, bool) {
 	var zero ET
 	if len(t.events) == 0 {
@@ -87,13 +72,6 @@ func recordEvent[ET events.EventMetadata](ctx context.Context, t *trace, event E
 
 	t.nextEventID = nextEventID
 	return nil
-}
-
-// createInputInstance creates a new instance of the Input type using reflection
-func createInputInstance[Input proto.Message]() Input {
-	var zero Input
-	inputType := reflect.TypeOf(zero).Elem()
-	return reflect.New(inputType).Interface().(Input)
 }
 
 // starlarkModule represents a module in Starlark

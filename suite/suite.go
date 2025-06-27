@@ -248,9 +248,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, events.EventTypeFinish, runEvents[3].Type())
 
 		// Test GetEvents for non-existent run
-		_, err = s.GetEvents(ctx, "non-existent-run")
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "not found")
+		runEvents, err = s.GetEvents(ctx, "non-existent-run")
+		require.NoError(t, err)
+		require.Empty(t, runEvents)
 	})
 
 	// Resume events can ignore sequential event ID requirement

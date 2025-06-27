@@ -109,10 +109,7 @@ func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*events.
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	runEvents, exists := s.events[runID]
-	if !exists {
-		return nil, fmt.Errorf("run with ID %s not found", runID)
-	}
+	runEvents := s.events[runID]
 
 	// Return a copy to avoid external modifications
 	result := make([]*events.Event, len(runEvents))
