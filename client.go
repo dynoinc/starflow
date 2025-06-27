@@ -248,12 +248,14 @@ func NewYieldError(ctx context.Context) (string, string, error) {
 	if !ok {
 		return "", "", fmt.Errorf("runID not found in context")
 	}
+
 	cid := shortuuid.New()
 	return runID, cid, &YieldError{cid: cid, runID: runID}
 }
 
-func YieldErrorFrom(yieldEvent YieldEvent) *YieldError {
-	return &YieldError{cid: yieldEvent.SignalID(), runID: yieldEvent.RunID()}
+func (y *YieldError) Is(target error) bool {
+	_, ok := target.(*YieldError)
+	return ok
 }
 
 // ErrConcurrentUpdate indicates optimistic concurrency failure.

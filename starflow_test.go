@@ -3,6 +3,7 @@ package starflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -1150,4 +1151,13 @@ func TestValidateInvariants(t *testing.T) {
 		err = validateInvariants("run1", resumeEvent, NewFinishEvent(nil, nil))
 		require.NoError(t, err)
 	})
+}
+
+func TestYieldError(t *testing.T) {
+	ctx := withRunID(context.Background(), "run1")
+	_, _, err := NewYieldError(ctx)
+	require.True(t, errors.Is(err, &YieldError{}))
+
+	var yErr *YieldError
+	require.ErrorAs(t, err, &yErr)
 }

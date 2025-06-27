@@ -612,7 +612,7 @@ func wrapFn(t *trace, regFn registeredFn) *starlark.Builtin {
 			resumeEvent, ok := popEvent[ResumeEvent](t)
 			if !ok {
 				// still waiting for the signal to resume
-				return starlark.None, YieldErrorFrom(yieldEvent)
+				return starlark.None, &YieldError{cid: yieldEvent.SignalID(), runID: yieldEvent.RunID()}
 			}
 
 			if resumeEvent.Output() != nil {
