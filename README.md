@@ -1,5 +1,8 @@
 # Starflow
 
+[![Build Status](https://github.com/dynoinc/starflow/actions/workflows/test.yml/badge.svg)](https://github.com/dynoinc/starflow/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/dynoinc/starflow.svg)](https://pkg.go.dev/github.com/dynoinc/starflow)
+
 A workflow engine for Go that enables deterministic and resumable workflow execution using Starlark scripting.
 
 ## Features
