@@ -1,6 +1,7 @@
 package starflow
 
 import (
+	"bytes"
 	"context"
 	"sync"
 )
@@ -14,8 +15,6 @@ type InMemoryStore struct {
 }
 
 // NewInMemoryStore creates a new InMemoryStore.
-// This is the recommended way to create an in-memory store for testing
-// or single-instance workflow execution.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
 		events: make(map[string][][]byte),
@@ -30,14 +29,11 @@ func (s *InMemoryStore) AppendEvent(ctx context.Context, runID string, expectedV
 	storedEvents := s.events[runID]
 	currentVersion := len(storedEvents)
 
-	// Optimistic concurrency control - check version matches
 	if currentVersion != expectedVersion {
 		return 0, ErrConcurrentUpdate
 	}
 
-	// Append the event data
 	s.events[runID] = append(s.events[runID], eventData)
-
 	return currentVersion + 1, nil
 }
 
@@ -47,13 +43,11 @@ func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([][]byte, 
 	defer s.mu.RUnlock()
 
 	runEvents := s.events[runID]
-
-	// Return a copy to avoid external modifications
 	result := make([][]byte, len(runEvents))
 	for i, eventData := range runEvents {
-		result[i] = make([]byte, len(eventData))
-		copy(result[i], eventData)
+		result[i] = bytes.Clone(eventData)
 	}
+
 	return result, nil
 }
 
@@ -68,9 +62,5 @@ func (s *InMemoryStore) GetLastEvent(ctx context.Context, runID string) ([]byte,
 	}
 
 	lastEventData := runEvents[len(runEvents)-1]
-	// Return a copy to avoid external modifications
-	result := make([]byte, len(lastEventData))
-	copy(result, lastEventData)
-
-	return result, len(runEvents), nil
+	return bytes.Clone(lastEventData), len(runEvents), nil
 }
