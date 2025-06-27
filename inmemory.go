@@ -28,6 +28,10 @@ func NewInMemoryStore() *InMemoryStore {
 
 // RecordEvent records an event for a given run.
 func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int, eventMetadata events.EventMetadata) (int, error) {
+	if runID == "" {
+		return 0, fmt.Errorf("runID must not be empty")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

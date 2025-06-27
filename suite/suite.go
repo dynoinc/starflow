@@ -274,4 +274,12 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		_, err = s.RecordEvent(ctx, runID, 999, events.NewResumeEvent("signal", output))
 		require.NoError(t, err)
 	})
+
+	// RecordEvent should reject empty runID
+	t.Run("RejectEmptyRunID", func(t *testing.T) {
+		s := newStore(t)
+		_, err := s.RecordEvent(ctx, "", 0, events.NewStartEvent("script-hash", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "runID must not be empty")
+	})
 }
