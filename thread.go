@@ -2,6 +2,8 @@ package starflow
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -336,7 +338,8 @@ func runThread[Input any, Output any](
 	}
 
 	// Record start event with input
-	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(runID, input)); err != nil {
+	scriptHash := sha256.Sum256(script)
+	if err := recordEvent(ctxWithRunID, t, events.NewStartEvent(hex.EncodeToString(scriptHash[:]), input)); err != nil {
 		return zero, fmt.Errorf("failed to record start event: %w", err)
 	}
 
