@@ -11,10 +11,8 @@ A workflow engine for Go that enables deterministic and resumable workflow execu
 Write workflows in Starlark (Python-like syntax) that are deterministic and can be replayed from any point with full durability guarantees. 
 Every execution step is recorded and can be resumed exactly where it left off.
 
-### Pluggable Backends
-Any store that can persist a sequence of events can be used as backend. We provide an in-memory implementation 
-as reference and a suite of conformance tests. Choose the storage solution that fits your deployment environment
-and scale requirements.
+### Pluggable Storage Backends
+Any store that implements the simple Store interface can be used as a backend. The interface uses append-only operations with optimistic concurrency control. 
 
 ## Installation
 

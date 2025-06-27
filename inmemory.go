@@ -53,3 +53,16 @@ func (s *InMemoryStore) GetEvents(ctx context.Context, runID string) ([]*Event, 
 	copy(result, runEvents)
 	return result, nil
 }
+
+// GetLastEvent returns the last event for a given run.
+func (s *InMemoryStore) GetLastEvent(ctx context.Context, runID string) (*Event, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	runEvents := s.events[runID]
+	if len(runEvents) == 0 {
+		return nil, 0, nil
+	}
+
+	return runEvents[len(runEvents)-1], len(runEvents), nil
+}

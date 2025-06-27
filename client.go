@@ -168,10 +168,13 @@ func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
 func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output any) error {
-	// Get current events to determine the expected version
-	events, err := c.store.GetEvents(ctx, runID)
+	lastEvent, version, err := c.store.GetLastEvent(ctx, runID)
 	if err != nil {
 		return err
+	}
+
+	if lastEvent == nil {
+		return fmt.Errorf("no last event found for run %s", runID)
 	}
 
 	resumeEvent := NewResumeEvent(cid, output)
@@ -181,16 +184,11 @@ func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, o
 	}
 
 	// Validate invariants
-	var lastEvent EventMetadata
-	if len(events) > 0 {
-		lastEvent = events[len(events)-1].Metadata
-	}
-
-	if err := validateInvariants(runID, lastEvent, resumeEvent); err != nil {
+	if err := validateInvariants(runID, lastEvent.Metadata, resumeEvent); err != nil {
 		return err
 	}
 
-	_, err = c.store.AppendEvent(ctx, runID, len(events), event)
+	_, err = c.store.AppendEvent(ctx, runID, version, event)
 	return err
 }
 

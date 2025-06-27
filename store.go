@@ -15,4 +15,7 @@ type Store interface {
 
 	// GetEvents returns the events for a given run in the order they were recorded.
 	GetEvents(ctx context.Context, runID string) ([]*Event, error)
+
+	// GetLastEvent returns the last event and version for a given run.
+	GetLastEvent(ctx context.Context, runID string) (*Event, int, error)
 }

@@ -118,7 +118,7 @@ func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) erro
 		if !reflect.DeepEqual(expected, event) {
 			return fmt.Errorf("event mismatch: expected %+v, got %+v", expected, event)
 		}
-		t.lastEvent = event
+
 		return nil
 	}
 
