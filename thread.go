@@ -146,46 +146,12 @@ func makeSleepBuiltin(t *trace) *starlark.Builtin {
 			return nil, fmt.Errorf("first argument must be context")
 		}
 
-		// duration can be a number (seconds) or a dict with seconds/nanos
-		var sleepDuration time.Duration
-		switch v := durationVal.(type) {
-		case starlark.Int:
-			seconds, ok := v.Int64()
-			if !ok {
-				return nil, fmt.Errorf("duration too large")
-			}
-			sleepDuration = time.Duration(seconds) * time.Second
-		case starlark.Float:
-			sleepDuration = time.Duration(float64(v) * float64(time.Second))
-		case *starlark.Dict:
-			// Handle dict with seconds/nanos like {"seconds": 1, "nanos": 500000000}
-			secondsVal, found, err := v.Get(starlark.String("seconds"))
-			if err != nil {
-				return nil, err
-			}
-			var seconds int64
-			if found {
-				if secInt, ok := secondsVal.(starlark.Int); ok {
-					seconds, _ = secInt.Int64()
-				}
-			}
-
-			nanosVal, found, err := v.Get(starlark.String("nanos"))
-			if err != nil {
-				return nil, err
-			}
-			var nanos int64
-			if found {
-				if nanoInt, ok := nanosVal.(starlark.Int); ok {
-					nanos, _ = nanoInt.Int64()
-				}
-			}
-
-			sleepDuration = time.Duration(seconds)*time.Second + time.Duration(nanos)*time.Nanosecond
-		default:
-			return nil, fmt.Errorf("duration must be number or dict")
+		duration, ok := durationVal.(startime.Duration)
+		if !ok {
+			return nil, fmt.Errorf("duration must be a Duration object from the time module")
 		}
 
+		sleepDuration := time.Duration(duration)
 		if sleepEvent, ok := popEvent[events.SleepEvent](t); ok {
 			sleepDuration = time.Until(sleepEvent.WakeupAt())
 		} else {

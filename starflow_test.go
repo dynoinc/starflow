@@ -412,30 +412,63 @@ def main(ctx, input):
 	s.Contains(output.Message, "random:")
 }
 
-// Sleep function with duration (using dict format)
+// Sleep function with duration object
 func (s *WorkflowTestSuite) TestSleepFunction() {
 	script := `
-load("time", "sleep")
+load("time", "sleep", "millisecond")
 
 def main(ctx, input):
-    sleep(ctx=ctx, duration={"seconds": 0, "nanos": 1000000})  # 1ms
+    sleep(ctx=ctx, duration=millisecond)  # 1ms
     return {"message": "slept"}
 `
 	output := s.mustRunScript(script, PingRequest{Message: "sleep"})
 	s.Equal("slept", output.Message)
 }
 
-// Sleep function with number duration (seconds)
-func (s *WorkflowTestSuite) TestSleepFunctionWithNumber() {
+// Sleep function with parsed duration
+func (s *WorkflowTestSuite) TestSleepFunctionWithParsedDuration() {
 	script := `
-load("time", "sleep")
+load("time", "sleep", "parse_duration")
 
 def main(ctx, input):
-    sleep(ctx=ctx, duration=0.001)  # 1ms as float
+    sleep(ctx=ctx, duration=parse_duration("1ms"))  # 1ms as parsed duration
     return {"message": "slept"}
 `
 	output := s.mustRunScript(script, PingRequest{Message: "sleep"})
 	s.Equal("slept", output.Message)
+}
+
+// Sleep function with Duration object from time module
+func (s *WorkflowTestSuite) TestSleepFunctionWithDuration() {
+	script := `
+load("time", "sleep", "parse_duration", "millisecond")
+
+def main(ctx, input):
+    # Sleep using parsed duration
+    duration1 = parse_duration("1ms")
+    sleep(ctx=ctx, duration=duration1)
+    
+    # Sleep using duration constant
+    sleep(ctx=ctx, duration=millisecond)
+    
+    return {"message": "slept with duration objects"}
+`
+	output := s.mustRunScript(script, PingRequest{Message: "duration-sleep"})
+	s.Equal("slept with duration objects", output.Message)
+}
+
+// Sleep function should reject non-Duration types
+func (s *WorkflowTestSuite) TestSleepFunctionRejectsNonDuration() {
+	script := `
+load("time", "sleep")
+
+def main(ctx, input):
+    sleep(ctx=ctx, duration=1.0)  # This should fail - not a Duration object
+    return {"message": "should not reach here"}
+`
+	_, err := s.client.Run(context.Background(), "test-reject-non-duration", []byte(script), PingRequest{Message: "test"})
+	s.Require().Error(err)
+	s.Contains(err.Error(), "duration must be a Duration object from the time module")
 }
 
 // Multiple function calls in sequence
