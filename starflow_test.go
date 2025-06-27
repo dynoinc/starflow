@@ -604,6 +604,34 @@ def main(ctx, input):
 	s.Contains(err.Error(), "event mismatch")
 }
 
+// Test Starlark time module with official functions
+func (s *WorkflowTestSuite) TestStarlarkTimeModule() {
+	script := `
+load("time", "parse_duration", "from_timestamp", "second", "minute", "hour")
+
+def main(ctx, input):
+    # Test duration constants
+    one_second = second
+    one_minute = minute
+    one_hour = hour
+    
+    # Test parse_duration
+    duration = parse_duration("5s")
+    
+    # Test from_timestamp
+    timestamp = from_timestamp(1640995200)  # 2022-01-01 00:00:00 UTC
+    
+    return {
+        "message": "Time module: duration=" + str(type(duration)) + ", timestamp=" + str(type(timestamp)) + ", constants=" + str(one_second) + " " + str(one_minute) + " " + str(one_hour)
+    }
+`
+	output := s.mustRunScript(script, PingRequest{Message: "time-module"})
+	s.Contains(output.Message, "Time module:")
+	s.Contains(output.Message, "duration")
+	s.Contains(output.Message, "time")
+	s.Contains(output.Message, "1s")
+}
+
 func TestWorkflowTestSuite(t *testing.T) {
 	suite.Run(t, new(WorkflowTestSuite))
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand"
 	"reflect"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	starjson "go.starlark.net/lib/json"
 	"go.starlark.net/lib/math"
+	startime "go.starlark.net/lib/time"
 	"go.starlark.net/starlark"
 	"go.starlark.net/syntax"
 
@@ -291,8 +293,10 @@ func runThread[Input any, Output any](
 		Load: func(thread *starlark.Thread, module string) (starlark.StringDict, error) {
 			if module == "time" {
 				members := make(starlark.StringDict)
-				members["sleep"] = makeSleepBuiltin(t)
+				maps.Copy(members, startime.Module.Members)
 				members["now"] = makeTimeNowBuiltin(t)
+				members["sleep"] = makeSleepBuiltin(t)
+				members.Freeze()
 				return members, nil
 			}
 			if module == "rand" {
