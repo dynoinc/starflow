@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"reflect"
 	"strings"
 	"time"
 
@@ -54,8 +55,10 @@ func popEvent[ET events.EventMetadata](t *trace) (ET, bool) {
 }
 
 func recordEvent[ET events.EventMetadata](ctx context.Context, t *trace, event ET) error {
-	if _, ok := popEvent[ET](t); ok {
-		// TODO: verify recorded event and expected event should be the same
+	if expected, ok := popEvent[ET](t); ok {
+		if !reflect.DeepEqual(expected, event) {
+			return fmt.Errorf("event mismatch: expected %+v, got %+v", expected, event)
+		}
 		return nil
 	}
 

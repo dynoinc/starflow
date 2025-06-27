@@ -553,6 +553,57 @@ def main(ctx, input):
 	s.Equal("JSON test: json-test", output.Message)
 }
 
+// Test resuming a yielded run with a different script should fail
+func (s *WorkflowTestSuite) TestResumeWithDifferentScriptShouldFail() {
+	yieldFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
+		_, _, err := starflow.NewYieldError(ctx)
+		return PingResponse{}, err
+	}
+
+	store := starflow.NewInMemoryStore()
+	client := starflow.NewClient[PingRequest, PingResponse](store)
+	starflow.RegisterFunc(client, yieldFn, starflow.WithName("test.YieldFunction"))
+
+	script1 := `
+def main(ctx, input):
+    test.YieldFunction(ctx=ctx, req={"message": input["message"]})
+    return {"message": "resumed from script1"}
+`
+	script2 := `
+def main(ctx, input):
+    test.YieldFunction(ctx=ctx, req={"message": input["message"]})
+    return {"message": "resumed from script2"}
+`
+
+	runID := "resume-different-script-test"
+	input := PingRequest{Message: "test"}
+
+	// First run: should yield
+	_, err := client.Run(context.Background(), runID, []byte(script1), input)
+	s.Require().Error(err)
+
+	// Get the signal ID from the yield event
+	eventsList, err := client.GetEvents(context.Background(), runID)
+	s.Require().NoError(err)
+	var signalID string
+	for _, ev := range eventsList {
+		if y, ok := ev.Metadata.(events.YieldEvent); ok {
+			signalID = y.SignalID()
+		}
+	}
+	s.Require().NotEmpty(signalID)
+
+	// Resume with signal (should succeed)
+	resumeOutput := PingResponse{Message: "signal_value"}
+	err = client.Signal(context.Background(), runID, signalID, resumeOutput)
+	s.Require().NoError(err)
+
+	// Now try to run again with a different script (should fail due to event mismatch)
+	_, err = client.Run(context.Background(), runID, []byte(script2), input)
+	s.Require().Error(err)
+	s.Contains(err.Error(), "event mismatch")
+}
+
 // In order for 'go test' to run this suite, we need to create a normal test function that calls suite.Run
 func TestWorkflowTestSuite(t *testing.T) {
 	suite.Run(t, new(WorkflowTestSuite))
