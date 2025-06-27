@@ -792,97 +792,86 @@ def main(ctx, input):
 	s.Equal("validation_complete", output["final_result"])
 
 	// Verify all retry attempts happened as expected
-	// Note: Functions may be called additional times during resume phases
-	s.True(checkpointAttempts >= 2, "Expected at least 2 checkpoint attempts, got %d", checkpointAttempts)
-	s.True(dataProcessingAttempts >= 3, "Expected at least 3 data processing attempts, got %d", dataProcessingAttempts)
-	s.Equal(4, finalValidationAttempts)
+	// The retry policies handle failures at the infrastructure level
+	s.Equal(3, checkpointAttempts, "Expected exactly 2 checkpoint attempts (with retries), got %d", checkpointAttempts)
+	s.Equal(4, dataProcessingAttempts, "Expected exactly 3 data processing attempts (with retries), got %d", dataProcessingAttempts)
+	s.Equal(4, finalValidationAttempts, "Expected exactly 4 final validation attempts (with retries), got %d", finalValidationAttempts)
 
 	// Get final event trace for comprehensive verification
 	finalEvents, err := client.GetEvents(context.Background(), runID)
 	s.Require().NoError(err)
 
-	// Verify the complete event sequence:
-	// 1. Start
-	// 2. Call test.Checkpoint (fails)
-	// 3. Call test.Checkpoint (succeeds, yields)
-	// 4. Yield (checkpoint)
-	// 5. Resume (checkpoint)
-	// 6. Return test.Checkpoint
-	// 7. Call time.sleep
-	// 8. Return time.sleep
-	// 9. Call test.DataProcessing (fails)
-	// 10. Call test.DataProcessing (fails)
-	// 11. Call test.DataProcessing (succeeds, yields)
-	// 12. Yield (data processing)
-	// 13. Resume (data processing)
-	// 14. Return test.DataProcessing
-	// 15. Call time.sleep
-	// 16. Return time.sleep
-	// 17. Call test.FinalValidation (fails)
-	// 18. Call test.FinalValidation (fails)
-	// 19. Call test.FinalValidation (fails)
-	// 20. Call test.FinalValidation (succeeds)
-	// 21. Return test.FinalValidation
-	// 22. Finish
+	// Verify the exact event sequence
+	expectedEventTypes := []EventType{
+		EventTypeStart,   // 1. Workflow starts
+		EventTypeTimeNow, // 2. Record start time
+		EventTypeRandInt, // 3. Generate session ID
+		EventTypeCall,    // 4. Call test.Checkpoint (succeeds after retries, yields)
+		EventTypeYield,   // 5. Yield for checkpoint approval
+		EventTypeResume,  // 6. Resume with checkpoint approval
+		EventTypeSleep,   // 7. Sleep 1ms
+		EventTypeCall,    // 8. Call test.DataProcessing (succeeds after retries, yields)
+		EventTypeYield,   // 9. Yield for data processing approval
+		EventTypeResume,  // 10. Resume with data processing approval
+		EventTypeSleep,   // 11. Sleep 2ms
+		EventTypeRandInt, // 12. Generate validation ID
+		EventTypeCall,    // 13. Call test.FinalValidation (succeeds after retries)
+		EventTypeReturn,  // 14. Return from test.FinalValidation
+		EventTypeTimeNow, // 15. Record end time
+		EventTypeFinish,  // 16. Workflow completes
+	}
 
-	// Verify that we have the basic event structure
-	// The exact count may vary due to additional random/time function calls and retry logic
-	s.True(len(finalEvents) > 10, "Should have substantial number of events, got %d", len(finalEvents))
+	s.Require().Len(finalEvents, len(expectedEventTypes), "Event count mismatch")
 
-	// Verify first and last events
-	s.Equal(EventTypeStart, finalEvents[0].Type(), "First event should be Start")
-	s.Equal(EventTypeFinish, finalEvents[len(finalEvents)-1].Type(), "Last event should be Finish")
+	for i, expectedType := range expectedEventTypes {
+		actualType := finalEvents[i].Type()
+		s.Require().Equal(expectedType, actualType, "Event %d type mismatch: expected %v, got %v", i, expectedType, actualType)
+	}
 
-	// Verify specific event details
-	var yieldCount, resumeCount int
-	var callEvents []CallEvent
-	var returnEvents []ReturnEvent
+	// Verify specific event details for critical events
+	var checkpointCallIdx, dataProcessingCallIdx, finalValidationCallIdx int
+	var checkpointYieldSignal, dataProcessingYieldSignal string
 
-	for _, ev := range finalEvents {
+	for i, ev := range finalEvents {
 		switch ev.Type() {
-		case EventTypeYield:
-			yieldCount++
-		case EventTypeResume:
-			resumeCount++
 		case EventTypeCall:
 			if call, ok := ev.Metadata.(CallEvent); ok {
-				callEvents = append(callEvents, call)
+				switch call.FunctionName() {
+				case "test.Checkpoint":
+					checkpointCallIdx = i
+				case "test.DataProcessing":
+					dataProcessingCallIdx = i
+				case "test.FinalValidation":
+					finalValidationCallIdx = i
+				}
 			}
-		case EventTypeReturn:
-			if ret, ok := ev.Metadata.(ReturnEvent); ok {
-				returnEvents = append(returnEvents, ret)
+		case EventTypeYield:
+			if yield, ok := ev.Metadata.(YieldEvent); ok {
+				if checkpointYieldSignal == "" {
+					checkpointYieldSignal = yield.SignalID()
+				} else {
+					dataProcessingYieldSignal = yield.SignalID()
+				}
 			}
 		}
 	}
 
-	// Verify we had exactly 2 yields and 2 resumes
-	s.Equal(2, yieldCount, "Expected exactly 2 yield events")
-	s.Equal(2, resumeCount, "Expected exactly 2 resume events")
+	// Verify the function calls are at the expected positions
+	s.Equal(3, checkpointCallIdx, "Checkpoint call should be at index 3")
+	s.Equal(7, dataProcessingCallIdx, "Data processing call should be at index 7")
+	s.Equal(12, finalValidationCallIdx, "Final validation call should be at index 12")
 
-	// Verify we had the right number of function calls
-	s.True(len(callEvents) >= 3, "Should have at least 3 function calls") // Includes retries and time functions
-	s.True(len(returnEvents) >= 1, "Should have at least 1 return event")
+	// Verify yield/resume signal IDs match
+	checkpointResumeEvent := finalEvents[5].Metadata.(ResumeEvent)
+	s.Equal(checkpointYieldSignal, checkpointResumeEvent.SignalID(), "Checkpoint yield/resume signal IDs should match")
 
-	// Verify specific function calls happened
-	var checkpointCalls, dataProcessingCalls, finalValidationCalls, sleepCalls int
-	for _, call := range callEvents {
-		switch call.FunctionName() {
-		case "test.Checkpoint":
-			checkpointCalls++
-		case "test.DataProcessing":
-			dataProcessingCalls++
-		case "test.FinalValidation":
-			finalValidationCalls++
-		case "time.sleep":
-			sleepCalls++
-		}
-	}
+	dataProcessingResumeEvent := finalEvents[9].Metadata.(ResumeEvent)
+	s.Equal(dataProcessingYieldSignal, dataProcessingResumeEvent.SignalID(), "Data processing yield/resume signal IDs should match")
 
-	// For now, just verify the basic counts are reasonable
-	s.True(len(callEvents) >= 3, "Should have at least 3 function calls")
-	s.True(checkpointCalls >= 1, "Expected at least 1 checkpoint call, got %d", checkpointCalls)
-	s.True(dataProcessingCalls >= 1, "Expected at least 1 data processing call, got %d", dataProcessingCalls)
-	s.True(finalValidationCalls >= 1, "Expected at least 1 final validation call, got %d", finalValidationCalls)
+	// Verify the final validation call succeeded
+	finalValidationReturn := finalEvents[13].Metadata.(ReturnEvent)
+	_, err = finalValidationReturn.Output()
+	s.Require().NoError(err, "Final validation should succeed")
 }
 
 // Test Starlark time module with official functions
