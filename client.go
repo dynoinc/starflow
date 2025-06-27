@@ -90,7 +90,9 @@ func (c *Client[Input]) Run(ctx context.Context, script []byte, input Input) (st
 	}
 
 	runID := shortuuid.New()
-	if err := c.store.CreateRun(ctx, runID, scriptHash, inputAny); err != nil {
+	startEvent := events.NewStartEvent(scriptHash, inputAny)
+	_, err = c.store.RecordEvent(ctx, runID, 0, startEvent)
+	if err != nil {
 		return "", fmt.Errorf("failed to create run: %w", err)
 	}
 	return runID, nil

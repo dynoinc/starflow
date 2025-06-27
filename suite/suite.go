@@ -34,7 +34,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 	t.Run("CreateRunWithNonExistentScriptHash", func(t *testing.T) {
 		s := newStore(t)
 		runID := shortuuid.New()
-		err := s.CreateRun(ctx, runID, "non-existent-hash", nil)
+		_, err := s.RecordEvent(ctx, runID, 0, events.NewStartEvent("non-existent-hash", nil))
 		require.Error(t, err)
 	})
 
@@ -46,9 +46,9 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.Error(t, err)
 	})
 
@@ -87,7 +87,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 		run, err := s.GetRun(ctx, runID)
 		require.NoError(t, err)
@@ -103,7 +103,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -132,7 +132,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -168,7 +168,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -211,7 +211,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -241,7 +241,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -264,7 +264,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -297,7 +297,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Test 1: Pending run should be claimed and returned
 		runID1 := shortuuid.New()
-		err = s.CreateRun(ctx, runID1, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID1, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 		claimedRuns, err := s.ClaimRuns(ctx, "worker1", time.Now().Add(10*time.Second))
 		require.NoError(t, err)
@@ -308,7 +308,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Test 2: Run with expired lease should be claimed and returned by a new worker
 		runID2 := shortuuid.New()
-		err = s.CreateRun(ctx, runID2, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID2, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 		// Manually record a claim event with an expired lease
 		run2, err := s.GetRun(ctx, runID2)
@@ -325,7 +325,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Test 3: Run leased by different worker (not expired) should NOT be claimed
 		runID3 := shortuuid.New()
-		err = s.CreateRun(ctx, runID3, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID3, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 		// Manually record a claim event with a valid lease
 		run3, err := s.GetRun(ctx, runID3)
@@ -353,7 +353,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -385,7 +385,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -418,7 +418,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		run, err := s.GetRun(ctx, runID)
@@ -472,7 +472,7 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 
 		// Test 2: Signaling with non-existent signal ID succeeds silently
 		runID := shortuuid.New()
-		err = s.CreateRun(ctx, runID, scriptHash, nil)
+		_, err = s.RecordEvent(ctx, runID, 0, events.NewStartEvent(scriptHash, nil))
 		require.NoError(t, err)
 
 		// Move to Running

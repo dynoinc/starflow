@@ -9,8 +9,6 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/dynoinc/starflow/events"
 )
 
@@ -66,35 +64,6 @@ func (s *InMemoryStore) GetScript(ctx context.Context, scriptHash string) ([]byt
 		return nil, fmt.Errorf("script with hash %s not found", scriptHash)
 	}
 	return content, nil
-}
-
-// CreateRun creates a new run record for a given script and runID.
-func (s *InMemoryStore) CreateRun(ctx context.Context, runID string, scriptHash string, input *anypb.Any) error {
-	now := time.Now()
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.scripts[scriptHash]; !exists {
-		return fmt.Errorf("script with hash %s not found", scriptHash)
-	}
-	if _, exists := s.runs[runID]; exists {
-		return fmt.Errorf("run with ID %s already exists", runID)
-	}
-
-	run := &Run{
-		ID:          runID,
-		ScriptHash:  scriptHash,
-		Status:      RunStatusPending,
-		Input:       input,
-		NextEventID: 0,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	s.runs[runID] = run
-	s.events[runID] = make([]*events.Event, 0)
-	return nil
 }
 
 // GetRun retrieves the details of a specific run.
@@ -156,9 +125,50 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Handle START event: create the run if it does not exist
+	if eventMetadata.EventType() == events.EventTypeStart {
+		if _, exists := s.runs[runID]; exists {
+			return 0, fmt.Errorf("run with ID %s already exists", runID)
+		}
+		startEvent, ok := eventMetadata.(events.StartEvent)
+		if !ok {
+			return 0, fmt.Errorf("invalid start event metadata")
+		}
+		if _, exists := s.scripts[startEvent.ScriptHash()]; !exists {
+			return 0, fmt.Errorf("script with hash %s not found", startEvent.ScriptHash())
+		}
+		now := time.Now()
+		run := &Run{
+			ID:          runID,
+			ScriptHash:  startEvent.ScriptHash(),
+			Input:       startEvent.Input(),
+			Status:      RunStatusPending,
+			NextEventID: 0,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		s.runs[runID] = run
+		s.events[runID] = make([]*events.Event, 0)
+		// Add the START event as the first event
+		event := &events.Event{
+			Timestamp: now,
+			Metadata:  eventMetadata,
+		}
+		s.events[runID] = append(s.events[runID], event)
+		run.NextEventID++
+		run.UpdatedAt = now
+		return run.NextEventID, nil
+	}
+
+	// For all other events, run must exist
 	storedRun, exists := s.runs[runID]
 	if !exists {
 		return 0, fmt.Errorf("run with ID %s not found", runID)
+	}
+
+	// Only allow START as the first event
+	if storedRun.NextEventID == 0 && eventMetadata.EventType() != events.EventTypeStart {
+		return 0, fmt.Errorf("first event for run %s must be START", runID)
 	}
 
 	// Check optimistic concurrency precondition

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/dynoinc/starflow/events"
 )
 
@@ -28,11 +26,11 @@ type Store interface {
 	SaveScript(ctx context.Context, scriptHash string, content []byte) error
 	GetScript(ctx context.Context, scriptHash string) ([]byte, error)
 
-	// Runs - Methods to create/introspect runs.
+	// Runs - Methods to introspect runs.
 	//
 	// Invariants:
-	// - Creating a run with a non-existent script hash fails.
-	// - Creating a run with a duplicate runID fails.
+	// - Runs are created by recording a START event. If a START event is recorded for a new runID, the run is created with the provided scriptHash and input.
+	// - Recording a START event for an existing runID fails.
 	// - GetRun returns a deep copy of the run state at the time of retrieval, ensuring that external modifications to the returned object do not affect the stored run object.
 	// - ClaimRuns finds runs that are either in RunStatusPending or in RunStatusRunning with an expired lease, records a ClaimEvent for each, and returns the updated runs.
 	// - Run status transitions are strictly defined:
@@ -41,14 +39,13 @@ type Store interface {
 	//   - Running -> Completed (via Finish event)
 	//   - Running -> Failed (via Finish event with error)
 	//   - Yielded -> Pending (via Resume event)
-	CreateRun(ctx context.Context, runID string, scriptHash string, input *anypb.Any) error
 	GetRun(ctx context.Context, runID string) (*Run, error)
 	ClaimRuns(ctx context.Context, workerID string, leaseUntil time.Time) ([]*Run, error)
 
 	// Events - Methods to record events.
 	//
 	// Invariants:
-	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID.
+	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID, or if it is a START event for a new runID.
 	// - Events for a given run are recorded sequentially, and NextEventID always reflects the expected next sequence number for an event, incrementing by one upon successful record.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.

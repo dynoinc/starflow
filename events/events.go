@@ -21,6 +21,7 @@ const (
 	EventTypeResume  EventType = "RESUME"
 	EventTypeFinish  EventType = "FINISH"
 	EventTypeClaim   EventType = "CLAIM"
+	EventTypeStart   EventType = "START"
 )
 
 type EventMetadata interface {
@@ -325,6 +326,41 @@ func (c *ClaimEvent) UnmarshalJSON(data []byte) error {
 	}
 	c.workerID = aux.WorkerID
 	c.until = aux.Until
+	return nil
+}
+
+// StartEvent metadata
+// Contains the scriptHash and input for starting a run.
+type StartEvent struct {
+	scriptHash string
+	input      *anypb.Any
+}
+
+func NewStartEvent(scriptHash string, input *anypb.Any) StartEvent {
+	return StartEvent{scriptHash: scriptHash, input: input}
+}
+
+func (s StartEvent) EventType() EventType { return EventTypeStart }
+func (s StartEvent) ScriptHash() string   { return s.scriptHash }
+func (s StartEvent) Input() *anypb.Any    { return s.input }
+
+func (s StartEvent) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]interface{}{
+		"scriptHash": s.scriptHash,
+		"input":      s.input,
+	})
+}
+
+func (s *StartEvent) UnmarshalJSON(data []byte) error {
+	var aux struct {
+		ScriptHash string     `json:"scriptHash"`
+		Input      *anypb.Any `json:"input"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	s.scriptHash = aux.ScriptHash
+	s.input = aux.Input
 	return nil
 }
 
