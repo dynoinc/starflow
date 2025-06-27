@@ -19,7 +19,7 @@ import (
 // Client provides an interface for creating and managing workflow runs.
 type Client[Input proto.Message] struct {
 	store       Store
-	scriptCache sync.Map // map[string]string (scriptHash -> savedScriptHash)
+	scriptCache sync.Map // map[string]struct{} (scriptHash -> struct{})
 }
 
 // NewClient creates a new workflow client with the specified input type.
@@ -67,7 +67,7 @@ func (c *Client[Input]) validateAndSave(ctx context.Context, script []byte) (str
 		return "", fmt.Errorf("failed to save script: %w", err)
 	}
 
-	c.scriptCache.Store(scriptHash, scriptHash)
+	c.scriptCache.Store(scriptHash, struct{}{})
 	return scriptHash, nil
 }
 
