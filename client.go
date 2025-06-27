@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"time"
 
 	"go.starlark.net/syntax"
 
@@ -167,8 +168,29 @@ func (c *Client[Input, Output]) GetEvents(ctx context.Context, runID string) ([]
 // Signal resumes a yielded workflow run with the provided output.
 // The cid parameter should match the signal ID from the yield event.
 func (c *Client[Input, Output]) Signal(ctx context.Context, runID, cid string, output any) error {
+	// Get current events to determine the expected version
+	events, err := c.store.GetEvents(ctx, runID)
+	if err != nil {
+		return err
+	}
+
 	resumeEvent := NewResumeEvent(cid, output)
-	_, err := c.store.RecordEvent(ctx, runID, 0, resumeEvent)
+	event := &Event{
+		Timestamp: time.Now(),
+		Metadata:  resumeEvent,
+	}
+
+	// Validate invariants
+	var lastEvent EventMetadata
+	if len(events) > 0 {
+		lastEvent = events[len(events)-1].Metadata
+	}
+
+	if err := validateInvariants(runID, lastEvent, resumeEvent); err != nil {
+		return err
+	}
+
+	_, err = c.store.AppendEvent(ctx, runID, len(events), event)
 	return err
 }
 

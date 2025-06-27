@@ -2,9 +2,7 @@ package starflow
 
 import (
 	"context"
-	"fmt"
 	"sync"
-	"time"
 )
 
 // InMemoryStore is an in-memory implementation of the Store interface.
@@ -24,86 +22,23 @@ func NewInMemoryStore() *InMemoryStore {
 	}
 }
 
-// RecordEvent records an event for a given run.
-func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEventID int, eventMetadata EventMetadata) (int, error) {
-	if runID == "" {
-		return 0, fmt.Errorf("runID must not be empty")
-	}
-
+// AppendEvent appends an event to a run's history with optimistic concurrency control.
+func (s *InMemoryStore) AppendEvent(ctx context.Context, runID string, expectedVersion int, event *Event) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if eventMetadata.EventType() == EventTypeStart {
-		if _, exists := s.events[runID]; exists {
-			// Invariant: Start event is only allowed for new runs.
-			return 0, fmt.Errorf("run %s already exists", runID)
-		}
+	storedEvents := s.events[runID]
+	currentVersion := len(storedEvents)
 
-		event := &Event{
-			Timestamp: time.Now(),
-			Metadata:  eventMetadata,
-		}
-
-		s.events[runID] = append(s.events[runID], event)
-		return 1, nil
-	}
-
-	storedEvents, exists := s.events[runID]
-	if !exists {
-		// Invariant: All other events are only allowed for existing runs.
-		return 0, fmt.Errorf("run %s not found", runID)
-	}
-
-	lastEvent := storedEvents[len(storedEvents)-1].Metadata
-	if lastEvent.EventType() == EventTypeFinish {
-		// Invariant: Nothing is allowed after a finish event.
-		return 0, fmt.Errorf("run %s has already finished", runID)
-	}
-
-	if nextEventID != len(storedEvents) && eventMetadata.EventType() != EventTypeResume {
-		// Invariant: Event ID must be sequential except for resume
+	// Optimistic concurrency control - check version matches
+	if currentVersion != expectedVersion {
 		return 0, ErrConcurrentUpdate
 	}
 
-	switch e := eventMetadata.(type) {
-	case ResumeEvent:
-		yieldEvent, ok := lastEvent.(YieldEvent)
-		if !ok {
-			// Invariant: Only yield events can be resumed.
-			return 0, fmt.Errorf("run %s is not in yielded state", runID)
-		}
+	// Append the event
+	s.events[runID] = append(s.events[runID], event)
 
-		if yieldEvent.SignalID() != e.SignalID() {
-			// Invariant: The signal ID must match the yield event.
-			return 0, fmt.Errorf("signal ID mismatch: %s != %s", yieldEvent.SignalID(), e.SignalID())
-		}
-	case YieldEvent:
-		if lastEvent.EventType() != EventTypeCall {
-			// Invariant: Only call events can be yielded.
-			return 0, fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), eventMetadata.EventType())
-		}
-	case ReturnEvent:
-		if lastEvent.EventType() != EventTypeCall {
-			// Invariant: Only call events can be returned.
-			return 0, fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), eventMetadata.EventType())
-		}
-	default:
-		if lastEvent.EventType() == EventTypeCall {
-			// Invariant: Only yield or return events are allowed after a call event.
-			return 0, fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), eventMetadata.EventType())
-		}
-		if lastEvent.EventType() == EventTypeYield {
-			// Invariant: Only resume events are allowed after a yield event.
-			return 0, fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), eventMetadata.EventType())
-		}
-	}
-
-	s.events[runID] = append(s.events[runID], &Event{
-		Timestamp: time.Now(),
-		Metadata:  eventMetadata,
-	})
-
-	return len(s.events[runID]), nil
+	return currentVersion + 1, nil
 }
 
 // GetEvents retrieves all events for a specific run, ordered by time.

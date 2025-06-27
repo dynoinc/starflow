@@ -1,4 +1,4 @@
-package starflow_test
+package starflow
 
 import (
 	"context"
@@ -7,10 +7,8 @@ import (
 	"time"
 
 	"github.com/cenkalti/backoff/v4"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-
-	"github.com/dynoinc/starflow"
-	starflowsuite "github.com/dynoinc/starflow/suite"
 )
 
 // Test data structures for JSON-based tests
@@ -38,17 +36,17 @@ type ComplexResponse struct {
 // WorkflowTestSuite provides a clean testing environment for starflow workflows.
 type WorkflowTestSuite struct {
 	suite.Suite
-	store  starflow.Store
-	client *starflow.Client[PingRequest, PingResponse]
+	store  Store
+	client *Client[PingRequest, PingResponse]
 }
 
 // SetupTest initializes a fresh client for each test.
 func (s *WorkflowTestSuite) SetupTest() {
-	s.store = starflow.NewInMemoryStore()
-	s.client = starflow.NewClient[PingRequest, PingResponse](s.store)
+	s.store = NewInMemoryStore()
+	s.client = NewClient[PingRequest, PingResponse](s.store)
 
 	// Register a standard ping function for tests
-	starflow.RegisterFunc(s.client, s.pingPong, starflow.WithName("test.PingPong"))
+	RegisterFunc(s.client, s.pingPong, WithName("test.PingPong"))
 }
 
 // Helper: pingPong is a standard test function
@@ -70,16 +68,16 @@ func (s *WorkflowTestSuite) mustRunScript(script string, input PingRequest) Ping
 }
 
 // Helper: getEvents retrieves events for a run (returns empty slice if not found)
-func (s *WorkflowTestSuite) getEvents(runID string) []*starflow.Event {
+func (s *WorkflowTestSuite) getEvents(runID string) []*Event {
 	eventList, err := s.client.GetEvents(context.Background(), runID)
 	if err != nil {
-		return []*starflow.Event{} // Return empty slice for non-existent runs
+		return []*Event{} // Return empty slice for non-existent runs
 	}
 	return eventList
 }
 
 // Helper: expectEvents verifies event sequence
-func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...starflow.EventType) {
+func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...EventType) {
 	actualEvents := s.getEvents(runID)
 	s.Require().Len(actualEvents, len(expectedTypes), "Event count mismatch")
 
@@ -92,7 +90,7 @@ func (s *WorkflowTestSuite) expectEvents(runID string, expectedTypes ...starflow
 func (s *WorkflowTestSuite) registerFunction(name string, fn any) {
 	switch f := fn.(type) {
 	case func(context.Context, PingRequest) (PingResponse, error):
-		starflow.RegisterFunc(s.client, f, starflow.WithName(name))
+		RegisterFunc(s.client, f, WithName(name))
 	default:
 		s.T().Fatalf("Unsupported function type: %T", fn)
 	}
@@ -200,8 +198,8 @@ func (s *WorkflowTestSuite) TestBasicTypes() {
 		}
 	}
 
-	client := starflow.NewClient[any, any](s.store)
-	starflow.RegisterFunc(client, typeTestFn, starflow.WithName("test.TypeTest"))
+	client := NewClient[any, any](s.store)
+	RegisterFunc(client, typeTestFn, WithName("test.TypeTest"))
 
 	// Test string
 	script := `
@@ -253,8 +251,8 @@ func (s *WorkflowTestSuite) TestComplexStructures() {
 		}, nil
 	}
 
-	client := starflow.NewClient[ComplexRequest, ComplexResponse](s.store)
-	starflow.RegisterFunc(client, complexFn, starflow.WithName("test.Complex"))
+	client := NewClient[ComplexRequest, ComplexResponse](s.store)
+	RegisterFunc(client, complexFn, WithName("test.Complex"))
 
 	script := `
 def main(ctx, input):
@@ -361,7 +359,7 @@ func (s *WorkflowTestSuite) TestRetryPolicy() {
 	}
 
 	policy := backoff.WithMaxRetries(backoff.NewConstantBackOff(1*time.Millisecond), 3)
-	starflow.RegisterFunc(s.client, retryFn, starflow.WithName("test.RetryFunction"), starflow.WithRetryPolicy(policy))
+	RegisterFunc(s.client, retryFn, WithName("test.RetryFunction"), WithRetryPolicy(policy))
 
 	script := `
 def main(ctx, input):
@@ -498,14 +496,14 @@ func (s *WorkflowTestSuite) TestYieldAndResume() {
 	var capturedRunID, capturedCID string
 	yieldFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
 		var err error
-		capturedRunID, capturedCID, err = starflow.NewYieldError(ctx)
+		capturedRunID, capturedCID, err = NewYieldError(ctx)
 		return PingResponse{}, err
 	}
 
 	// Create separate client for this test to manage yield/resume
-	store := starflow.NewInMemoryStore()
-	client := starflow.NewClient[PingRequest, PingResponse](store)
-	starflow.RegisterFunc(client, yieldFn, starflow.WithName("test.YieldFunction"))
+	store := NewInMemoryStore()
+	client := NewClient[PingRequest, PingResponse](store)
+	RegisterFunc(client, yieldFn, WithName("test.YieldFunction"))
 
 	script := `
 def main(ctx, input):
@@ -520,7 +518,7 @@ def main(ctx, input):
 	s.Require().Error(err)
 
 	// Check that it's a yield error
-	var yieldErr *starflow.YieldError
+	var yieldErr *YieldError
 	s.Require().ErrorAs(err, &yieldErr)
 
 	// Resume with signal
@@ -546,10 +544,10 @@ def main(ctx, input):
 
 	// Verify basic event sequence
 	s.expectEvents(runID,
-		starflow.EventTypeStart,
-		starflow.EventTypeCall,
-		starflow.EventTypeReturn,
-		starflow.EventTypeFinish,
+		EventTypeStart,
+		EventTypeCall,
+		EventTypeReturn,
+		EventTypeFinish,
 	)
 }
 
@@ -588,13 +586,13 @@ def main(ctx, input):
 // Test resuming a yielded run with a different script should fail
 func (s *WorkflowTestSuite) TestResumeWithDifferentScriptShouldFail() {
 	yieldFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
-		_, _, err := starflow.NewYieldError(ctx)
+		_, _, err := NewYieldError(ctx)
 		return PingResponse{}, err
 	}
 
-	store := starflow.NewInMemoryStore()
-	client := starflow.NewClient[PingRequest, PingResponse](store)
-	starflow.RegisterFunc(client, yieldFn, starflow.WithName("test.YieldFunction"))
+	store := NewInMemoryStore()
+	client := NewClient[PingRequest, PingResponse](store)
+	RegisterFunc(client, yieldFn, WithName("test.YieldFunction"))
 
 	script1 := `
 def main(ctx, input):
@@ -619,7 +617,7 @@ def main(ctx, input):
 	s.Require().NoError(err)
 	var signalID string
 	for _, ev := range eventsList {
-		if y, ok := ev.Metadata.(starflow.YieldEvent); ok {
+		if y, ok := ev.Metadata.(YieldEvent); ok {
 			signalID = y.SignalID()
 		}
 	}
@@ -669,7 +667,7 @@ func (s *WorkflowTestSuite) TestContextPassedToRegisteredFunctions() {
 	// Register a function that extracts information from the context
 	contextTestFn := func(ctx context.Context, req PingRequest) (PingResponse, error) {
 		// Extract run ID from context to verify it's the correct context
-		runID, ok := starflow.GetRunID(ctx)
+		runID, ok := GetRunID(ctx)
 		if !ok {
 			return PingResponse{}, fmt.Errorf("no run ID found in context")
 		}
@@ -702,8 +700,198 @@ func TestWorkflowTestSuite(t *testing.T) {
 	suite.Run(t, new(WorkflowTestSuite))
 }
 
-func TestInMemoryStore(t *testing.T) {
-	starflowsuite.RunStoreSuite(t, func(t *testing.T) starflow.Store {
-		return starflow.NewInMemoryStore()
+func TestInMemoryStoreBasics(t *testing.T) {
+	store := NewInMemoryStore()
+	ctx := context.Background()
+
+	// Test basic append functionality
+	event1 := &Event{
+		Timestamp: time.Now(),
+		Metadata:  NewStartEvent("script-hash", nil),
+	}
+
+	version, err := store.AppendEvent(ctx, "run1", 0, event1)
+	require.NoError(t, err)
+	require.Equal(t, 1, version)
+
+	// Test concurrent update detection
+	event2 := &Event{
+		Timestamp: time.Now(),
+		Metadata:  NewCallEvent("fn", nil),
+	}
+
+	// Should fail with wrong version
+	_, err = store.AppendEvent(ctx, "run1", 0, event2)
+	require.ErrorIs(t, err, ErrConcurrentUpdate)
+
+	// Should succeed with correct version
+	version, err = store.AppendEvent(ctx, "run1", 1, event2)
+	require.NoError(t, err)
+	require.Equal(t, 2, version)
+
+	// Test GetEvents
+	events, err := store.GetEvents(ctx, "run1")
+	require.NoError(t, err)
+	require.Len(t, events, 2)
+	require.Equal(t, EventTypeStart, events[0].Type())
+	require.Equal(t, EventTypeCall, events[1].Type())
+}
+
+func TestValidateInvariants(t *testing.T) {
+	t.Run("EmptyRunID", func(t *testing.T) {
+		err := validateInvariants("", nil, NewStartEvent("script-hash", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "runID must not be empty")
+	})
+
+	t.Run("StartEventOnlyForNewRuns", func(t *testing.T) {
+		// Start event with no previous events should succeed
+		err := validateInvariants("run1", nil, NewStartEvent("script-hash", nil))
+		require.NoError(t, err)
+
+		// Start event with existing events should fail
+		lastEvent := NewStartEvent("script-hash", nil)
+		err = validateInvariants("run1", lastEvent, NewStartEvent("script-hash", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "already exists")
+	})
+
+	t.Run("OtherEventsOnlyForExistingRuns", func(t *testing.T) {
+		// Non-start event with no previous events should fail
+		err := validateInvariants("run1", nil, NewCallEvent("fn", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("NothingAllowedAfterFinish", func(t *testing.T) {
+		finishEvent := NewFinishEvent(nil, nil)
+
+		// Try to record another event after finish
+		err := validateInvariants("run1", finishEvent, NewCallEvent("fn", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "has already finished")
+	})
+
+	t.Run("OnlyYieldEventsCanBeResumed", func(t *testing.T) {
+		callEvent := NewCallEvent("fn", nil)
+
+		// Try to resume after a call event (should fail)
+		err := validateInvariants("run1", callEvent, NewResumeEvent("signal", "output"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "not in yielded state")
+	})
+
+	t.Run("SignalIDMustMatchYieldEvent", func(t *testing.T) {
+		yieldEvent := NewYieldEvent("signal1", "run1")
+
+		// Try to resume with wrong signal ID
+		err := validateInvariants("run1", yieldEvent, NewResumeEvent("signal2", "output"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "signal ID mismatch")
+
+		// Correct signal ID should work
+		err = validateInvariants("run1", yieldEvent, NewResumeEvent("signal1", "output"))
+		require.NoError(t, err)
+	})
+
+	t.Run("OnlyCallEventsCanBeYielded", func(t *testing.T) {
+		startEvent := NewStartEvent("script-hash", nil)
+
+		// Try to yield after start event (should fail)
+		err := validateInvariants("run1", startEvent, NewYieldEvent("signal", "run1"))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+	})
+
+	t.Run("OnlyCallEventsCanBeReturned", func(t *testing.T) {
+		startEvent := NewStartEvent("script-hash", nil)
+
+		// Try to return after start event (should fail)
+		err := validateInvariants("run1", startEvent, NewReturnEvent(nil, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+	})
+
+	t.Run("OnlyYieldOrReturnAfterCall", func(t *testing.T) {
+		callEvent := NewCallEvent("fn", nil)
+
+		// Try to record another call event after call (should fail)
+		err := validateInvariants("run1", callEvent, NewCallEvent("fn2", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+
+		// Try to record finish event after call (should fail)
+		err = validateInvariants("run1", callEvent, NewFinishEvent(nil, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+
+		// Yield should work
+		err = validateInvariants("run1", callEvent, NewYieldEvent("signal", "run1"))
+		require.NoError(t, err)
+
+		// Return should work
+		err = validateInvariants("run1", callEvent, NewReturnEvent(nil, nil))
+		require.NoError(t, err)
+	})
+
+	t.Run("OnlyResumeAfterYield", func(t *testing.T) {
+		yieldEvent := NewYieldEvent("signal", "run1")
+
+		// Try to record call event after yield (should fail)
+		err := validateInvariants("run1", yieldEvent, NewCallEvent("fn2", nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+
+		// Try to record return event after yield (should fail)
+		err = validateInvariants("run1", yieldEvent, NewReturnEvent(nil, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+
+		// Try to record finish event after yield (should fail)
+		err = validateInvariants("run1", yieldEvent, NewFinishEvent(nil, nil))
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid event type")
+
+		// Resume should work
+		err = validateInvariants("run1", yieldEvent, NewResumeEvent("signal", "output"))
+		require.NoError(t, err)
+	})
+
+	t.Run("ValidTransitions", func(t *testing.T) {
+		// Start -> Call
+		startEvent := NewStartEvent("script-hash", nil)
+		err := validateInvariants("run1", startEvent, NewCallEvent("fn", nil))
+		require.NoError(t, err)
+
+		// Start -> Finish
+		err = validateInvariants("run1", startEvent, NewFinishEvent(nil, nil))
+		require.NoError(t, err)
+
+		// Call -> Return
+		callEvent := NewCallEvent("fn", nil)
+		err = validateInvariants("run1", callEvent, NewReturnEvent(nil, nil))
+		require.NoError(t, err)
+
+		// Call -> Yield
+		err = validateInvariants("run1", callEvent, NewYieldEvent("signal", "run1"))
+		require.NoError(t, err)
+
+		// Return -> Call
+		returnEvent := NewReturnEvent(nil, nil)
+		err = validateInvariants("run1", returnEvent, NewCallEvent("fn2", nil))
+		require.NoError(t, err)
+
+		// Return -> Finish
+		err = validateInvariants("run1", returnEvent, NewFinishEvent(nil, nil))
+		require.NoError(t, err)
+
+		// Resume -> Call
+		resumeEvent := NewResumeEvent("signal", "output")
+		err = validateInvariants("run1", resumeEvent, NewCallEvent("fn2", nil))
+		require.NoError(t, err)
+
+		// Resume -> Finish
+		err = validateInvariants("run1", resumeEvent, NewFinishEvent(nil, nil))
+		require.NoError(t, err)
 	})
 }

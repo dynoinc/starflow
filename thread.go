@@ -27,15 +27,22 @@ type trace struct {
 
 	events      []*Event
 	nextEventID int
+	lastEvent   EventMetadata // Track last event for invariant validation
 }
 
 func newTrace(runID string, store Store, events []*Event) *trace {
+	var lastEvent EventMetadata
+	if len(events) > 0 {
+		lastEvent = events[len(events)-1].Metadata
+	}
+
 	return &trace{
 		runID: runID,
 		store: store,
 
 		events:      events,
 		nextEventID: len(events),
+		lastEvent:   lastEvent,
 	}
 }
 
@@ -54,11 +61,64 @@ func popEvent[ET EventMetadata](t *trace) (ET, bool) {
 	return nextEvent.Metadata.(ET), true
 }
 
+// validateInvariants validates business logic rules for event transitions.
+// This contains all the invariants that were previously in the Store implementations.
+func validateInvariants(runID string, lastEvent EventMetadata, newEvent EventMetadata) error {
+	if runID == "" {
+		return fmt.Errorf("runID must not be empty")
+	}
+
+	if newEvent.EventType() == EventTypeStart {
+		if lastEvent != nil {
+			return fmt.Errorf("run %s already exists", runID)
+		}
+		return nil
+	}
+
+	if lastEvent == nil {
+		return fmt.Errorf("run %s not found", runID)
+	}
+
+	if lastEvent.EventType() == EventTypeFinish {
+		return fmt.Errorf("run %s has already finished", runID)
+	}
+
+	switch e := newEvent.(type) {
+	case ResumeEvent:
+		yieldEvent, ok := lastEvent.(YieldEvent)
+		if !ok {
+			return fmt.Errorf("run %s is not in yielded state", runID)
+		}
+
+		if yieldEvent.SignalID() != e.SignalID() {
+			return fmt.Errorf("signal ID mismatch: %s != %s", yieldEvent.SignalID(), e.SignalID())
+		}
+	case YieldEvent:
+		if lastEvent.EventType() != EventTypeCall {
+			return fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), newEvent.EventType())
+		}
+	case ReturnEvent:
+		if lastEvent.EventType() != EventTypeCall {
+			return fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), newEvent.EventType())
+		}
+	default:
+		if lastEvent.EventType() == EventTypeCall {
+			return fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), newEvent.EventType())
+		}
+		if lastEvent.EventType() == EventTypeYield {
+			return fmt.Errorf("invalid event type: %s -> %s not allowed", lastEvent.EventType(), newEvent.EventType())
+		}
+	}
+
+	return nil
+}
+
 func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) error {
 	if expected, ok := popEvent[ET](t); ok {
 		if !reflect.DeepEqual(expected, event) {
 			return fmt.Errorf("event mismatch: expected %+v, got %+v", expected, event)
 		}
+		t.lastEvent = event
 		return nil
 	}
 
@@ -66,12 +126,25 @@ func recordEvent[ET EventMetadata](ctx context.Context, t *trace, event ET) erro
 		return fmt.Errorf("trying to record event %s, but there are %d events left in the trace", event.EventType(), len(t.events))
 	}
 
-	nextEventID, err := t.store.RecordEvent(ctx, t.runID, t.nextEventID, event)
+	// Validate invariants at the package level
+	if err := validateInvariants(t.runID, t.lastEvent, event); err != nil {
+		return err
+	}
+
+	// Create the event
+	newEvent := &Event{
+		Timestamp: time.Now(),
+		Metadata:  event,
+	}
+
+	// Delegate to simplified store with OCC
+	nextEventID, err := t.store.AppendEvent(ctx, t.runID, t.nextEventID, newEvent)
 	if err != nil {
 		return fmt.Errorf("failed to record event: %w", err)
 	}
 
 	t.nextEventID = nextEventID
+	t.lastEvent = event
 	return nil
 }
 
