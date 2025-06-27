@@ -37,8 +37,8 @@ type Store interface {
 	// - Run status transitions are strictly defined:
 	//   - Pending -> Running (via Claim event)
 	//   - Running -> Yielded (via Yield event)
-	//   - Running -> Failed (via Return event with error)
 	//   - Running -> Completed (via Finish event)
+	//   - Running -> Failed (via Finish event with error)
 	//   - Yielded -> Pending (via Resume event)
 	CreateRun(ctx context.Context, scriptHash string, input *anypb.Any) (string, error)
 	GetRun(ctx context.Context, runID string) (*Run, error)
@@ -49,7 +49,6 @@ type Store interface {
 	// Invariants:
 	// - RecordEvent succeeds iff runID is valid and nextEventID is equal to current nextEventID.
 	// - Events for a given run are recorded sequentially, and NextEventID always reflects the expected next sequence number for an event, incrementing by one upon successful record.
-	// - If event is a return event with error, run will be updated to be in status RunStatusFailed.
 	// - If event is a yield event, run will be updated to be in status RunStatusYielded.
 	// - If event is a finish event, run will be updated to be in status RunStatusCompleted with the output.
 	// - If event is a finish event with error, run will be updated to be in status RunStatusFailed with the error.

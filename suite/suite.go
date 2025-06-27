@@ -91,13 +91,17 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.NoError(t, err)
 		require.Equal(t, int64(0), run.NextEventID)
 
-		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, events.NewCallEvent("fn", nil))
+		nextEventID, err := s.RecordEvent(ctx, id, run.NextEventID, events.NewClaimEvent("worker", time.Now().Add(10*time.Second)))
 		require.NoError(t, err)
 		require.Equal(t, int64(1), nextEventID)
 
+		nextEventID, err = s.RecordEvent(ctx, id, nextEventID, events.NewCallEvent("fn", nil))
+		require.NoError(t, err)
+		require.Equal(t, int64(2), nextEventID)
+
 		run, err = s.GetRun(ctx, id)
 		require.NoError(t, err)
-		require.Equal(t, int64(1), run.NextEventID)
+		require.Equal(t, int64(2), run.NextEventID)
 	})
 
 	t.Run("OptimisticRecordEvent", func(t *testing.T) {
@@ -157,7 +161,17 @@ func RunStoreSuite(t *testing.T, newStore StoreFactory) {
 		require.Equal(t, int64(1), run.NextEventID)
 
 		testError := errors.New("test error")
+		// After Return event with error, run should still be Running
 		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewReturnEvent(nil, testError))
+		require.NoError(t, err)
+
+		run, err = s.GetRun(ctx, id)
+		require.NoError(t, err)
+		require.Equal(t, starflow.RunStatusRunning, run.Status)
+		require.Nil(t, run.Error)
+
+		// After Finish event with error, run should be Failed
+		_, err = s.RecordEvent(ctx, id, run.NextEventID, events.NewFinishEvent(nil, testError))
 		require.NoError(t, err)
 
 		run, err = s.GetRun(ctx, id)

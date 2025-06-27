@@ -177,7 +177,7 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 		if storedRun.Status != RunStatusRunning {
 			return 0, errors.New("invalid state transition: yield event only allowed from running state")
 		}
-	case events.EventTypeReturn:
+	case events.EventTypeReturn, events.EventTypeCall:
 		if storedRun.Status != RunStatusRunning {
 			return 0, errors.New("invalid state transition: return event only allowed from running state")
 		}
@@ -210,14 +210,6 @@ func (s *InMemoryStore) RecordEvent(ctx context.Context, runID string, nextEvent
 
 	// Update the runs
 	switch eventMetadata.EventType() {
-	case events.EventTypeReturn:
-		if returnEvent, ok := event.Metadata.(events.ReturnEvent); ok {
-			_, err := returnEvent.Output()
-			if err != nil {
-				storedRun.Status = RunStatusFailed
-				storedRun.Error = err
-			}
-		}
 	case events.EventTypeYield:
 		if yieldEvent, ok := event.Metadata.(events.YieldEvent); ok {
 			storedRun.Status = RunStatusYielded
