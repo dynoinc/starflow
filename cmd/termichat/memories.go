@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-type MemoryRequest struct {
+type StoreMemoryRequest struct {
 	Memory string `json:"memory"`
 }
 
-type MemoryResponse struct {
+type StoreMemoryResponse struct {
 	Success bool `json:"success"`
 }
 
@@ -22,17 +22,17 @@ type RestoreMemoryResponse struct {
 	Memories []string `json:"memories"`
 }
 
-func MemoryStore(db *sql.DB) func(context.Context, MemoryRequest) (MemoryResponse, error) {
-	return func(ctx context.Context, req MemoryRequest) (MemoryResponse, error) {
+func MemoriesStore(db *sql.DB) func(context.Context, StoreMemoryRequest) (StoreMemoryResponse, error) {
+	return func(ctx context.Context, req StoreMemoryRequest) (StoreMemoryResponse, error) {
 		_, err := db.ExecContext(ctx, `INSERT INTO user_memories(timestamp, memory) VALUES (?, ?)`, time.Now(), req.Memory)
 		if err != nil {
-			return MemoryResponse{Success: false}, err
+			return StoreMemoryResponse{Success: false}, err
 		}
-		return MemoryResponse{Success: true}, nil
+		return StoreMemoryResponse{Success: true}, nil
 	}
 }
 
-func MemoryRestore(db *sql.DB) func(context.Context, RestoreMemoryRequest) (RestoreMemoryResponse, error) {
+func MemoriesRestore(db *sql.DB) func(context.Context, RestoreMemoryRequest) (RestoreMemoryResponse, error) {
 	return func(ctx context.Context, req RestoreMemoryRequest) (RestoreMemoryResponse, error) {
 		rows, err := db.QueryContext(ctx, `SELECT memory FROM user_memories ORDER BY timestamp DESC LIMIT ?`, req.Count)
 		if err != nil {

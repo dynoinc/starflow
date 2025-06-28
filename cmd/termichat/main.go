@@ -59,8 +59,8 @@ func main() {
 	starflow.RegisterFunc(client, ConversationsHistory(sqlite, conversationID), starflow.WithName("conversations.history"))
 
 	// Memories
-	starflow.RegisterFunc(client, MemoryStore(sqlite), starflow.WithName("memory.store"))
-	starflow.RegisterFunc(client, MemoryRestore(sqlite), starflow.WithName("memory.restore"))
+	starflow.RegisterFunc(client, MemoriesStore(sqlite), starflow.WithName("memories.store"))
+	starflow.RegisterFunc(client, MemoriesRestore(sqlite), starflow.WithName("memories.restore"))
 
 	// MCP
 	clients, err := Start(ctx, os.Getenv("MCP_SERVERS"))

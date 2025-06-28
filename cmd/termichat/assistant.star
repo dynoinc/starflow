@@ -85,9 +85,10 @@ def main(ctx, input):
         A dictionary containing the response from the assistant
     """
 
-    # Load memories and MCP tools available to the assistant
+    # Load conversation history, memories and MCP tools available to the assistant
+    history = conversations.history(ctx, {"count": 5})
+    memories = memories.restore(ctx, {"count": 5}).get("memories", [])
     mcp_tools = mcp.list_tools(ctx, {})
-    memories = memory.restore(ctx, {"count": 5}).get("memories", [])
 
     system_prompt = "You are a helpful assistant.\n\n"
     if memories:
@@ -97,10 +98,9 @@ def main(ctx, input):
         Use these memories to provide more contextual and personalized assistance.
         '''.format(memories_text="\n".join(["- " + mem for mem in memories]))
 
-    messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": input["message"]}
-    ]
+    messages = [{"role": "system", "content": system_prompt}]
+    for message in history.get("messages", []):
+        messages.append({"role": message.get("role"), "content": message.get("message")})
 
     max_iterations = 5
     for iteration in range(max_iterations):

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"time"
 )
 
@@ -39,9 +40,11 @@ func ConversationsHistory(sqlite *sql.DB, conversationID string) func(ctx contex
 			if err != nil {
 				return nil, err
 			}
+
 			messages = append(messages, Message{Role: role, Message: message})
 		}
 
+		slices.Reverse(messages)
 		return &ConversationsHistoryOutput{Messages: messages}, nil
 	}
 }
