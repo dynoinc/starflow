@@ -6,6 +6,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/chzyer/readline v1.5.1
 	github.com/joho/godotenv v1.5.1
+	github.com/lithammer/shortuuid v3.0.0+incompatible
 	github.com/lithammer/shortuuid/v4 v4.2.0
 	github.com/lmittmann/tint v1.1.2
 	github.com/mark3labs/mcp-go v0.32.0

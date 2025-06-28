@@ -2,7 +2,7 @@
 
 load("json", json_decode="decode")
 
-tools = [
+inbuilt_tools = [
         {
             "type": "function",
             "function": {
@@ -22,64 +22,74 @@ tools = [
         }
     ]
 
-def create_completion_params(messages, include_tools=True):
-    """Create OpenAI ChatCompletionNewParams"""
-    params = {
-        "messages": messages,
-        "model": "gpt-4o-mini"
-    }
-    if include_tools:
-        params["tools"] = tools
-    return params
-
-def extract_message_from_completion(result):
-    """Extract message from OpenAI ChatCompletion response"""
-    if not result.get("choices") or len(result["choices"]) == 0:
-        return None
-    return result["choices"][0]["message"]
-
-def create_assistant_message(message):
-    """Create assistant message for conversation history"""
-    assistant_message = {"role": "assistant"}
-    if message.get("content"):
-        assistant_message["content"] = message["content"]
-    if message.get("tool_calls"):
-        assistant_message["tool_calls"] = message["tool_calls"]
-    return assistant_message
-
 def execute_tool_calls(ctx, tool_calls):
-    """Execute tool calls and return tool messages"""
+    """
+    Execute tool calls and return tool messages.
+
+    Args:
+        ctx: The context of the assistant run
+        tool_calls: The tool calls to execute
+
+    Returns:
+        A list of tool messages
+    """
     tool_messages = []
     for tool_call in tool_calls:
-        if tool_call["function"]["name"] == "memory_store":
-            args = json_decode(tool_call["function"]["arguments"])
+        function_name = tool_call["function"]["name"]
+        args = json_decode(tool_call["function"]["arguments"])
+        
+        if function_name == "memory_store":
+            # Handle memory store as before
             memory_result = memory.store(ctx, {"memory": args["memory"]})
-            
             success_msg = "Memory stored successfully"
             error_msg = "Failed to store memory"
             content = success_msg if memory_result["success"] else error_msg
             
-            tool_message = {
-                "role": "tool",
-                "tool_call_id": tool_call["id"],
-                "content": content
-            }
-            tool_messages.append(tool_message)
+        elif "_" in function_name:
+            # Handle MCP tools (format: servername_toolname)
+            parts = function_name.split("_", 1)
+            server_name = parts[0]
+            tool_name = parts[1]
+            
+            call_result = mcp.call_tool(ctx, {
+                "server": server_name,
+                "tool": tool_name,
+                "arguments": args
+            })
+            
+            if call_result.get("isError"):
+                content = "Error: " + str(call_result.get("content", "Unknown error"))
+            else:
+                content = str(call_result.get("content", ""))
+        else:
+            content = "Unknown tool: " + function_name
+        
+        tool_message = {
+            "role": "tool",
+            "tool_call_id": tool_call["id"],
+            "content": content
+        }
+        tool_messages.append(tool_message)
+    
     return tool_messages
 
-def load_recent_memories(ctx):
-    """Load the 5 most recent memories"""
-    memory_result = memory.restore(ctx, {"count": 5})
-    return memory_result.get("memories", [])
-
 def main(ctx, input):
+    """
+    Main function for the assistant.
+
+    Args:
+        ctx: The context of the assistant run
+        input: The input message from the user
+
+    Returns:
+        A dictionary containing the response from the assistant
+    """
+
+    # Load memories and MCP tools available to the assistant
+    mcp_tools = mcp.list_tools(ctx, {})
+    memories = memory.restore(ctx, {"count": 5}).get("memories", [])
+
     system_prompt = "You are a helpful assistant.\n\n"
-
-    for server in mcp.list_servers(ctx, {}):
-        print(server)
-
-    # Add memories to the system message
-    memories = load_recent_memories(ctx)
     if memories:
         system_prompt += '''
         Recent memories from our past conversations:
@@ -96,6 +106,12 @@ def main(ctx, input):
     for iteration in range(max_iterations):
         is_final_iteration = (iteration == max_iterations - 1)
 
+        completion_params = {
+            "messages": messages,
+            "model": "gpt-4o-mini",
+            "temperature": 0.5
+        }
+
         if is_final_iteration:
             messages.append({
                 "role": "system", 
@@ -108,23 +124,21 @@ def main(ctx, input):
                 4. How the user can continue or resume this work
                 '''
             })
-
-        include_tools = not is_final_iteration
-        completion_params = create_completion_params(messages, include_tools)
-        result = openai.complete(ctx, completion_params)
+        else:
+            completion_params["tools"] = inbuilt_tools + mcp_tools
         
-        message = extract_message_from_completion(result)
-        if not message:
+        result = openai.complete(ctx, completion_params)
+        if not result.get("choices", []):
             return {"response": "No response from the model"}
         
-        assistant_message = create_assistant_message(message)
+        assistant_message = result["choices"][0]["message"]
         messages.append(assistant_message)
         
-        has_tool_calls = message.get("tool_calls")
+        has_tool_calls = assistant_message.get("tool_calls")
         if not has_tool_calls:
             break
 
-        tool_messages = execute_tool_calls(ctx, message["tool_calls"])
+        tool_messages = execute_tool_calls(ctx, assistant_message["tool_calls"])
         messages.extend(tool_messages)
     
-    return {"response": messages[-1].get("content", "")} 
+    return {"response": messages[-1].get("content", "No content in the model response")} 
