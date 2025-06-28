@@ -31,6 +31,7 @@ type Response struct {
 
 func main() {
 	_ = godotenv.Load()
+	ctx := context.Background()
 
 	if err := starflow.ValidateScript(assistantScript); err != nil {
 		panic(err)
@@ -51,6 +52,7 @@ func main() {
 		panic(err)
 	}
 
+	// Starflow
 	client := starflow.NewClient[Message, Response](NewSQLiteStore(sqlite))
 
 	// OpenAI client
@@ -62,6 +64,13 @@ func main() {
 	// Memories
 	starflow.RegisterFunc(client, MemoryStore(sqlite), starflow.WithName("memory.store"))
 	starflow.RegisterFunc(client, MemoryRestore(sqlite), starflow.WithName("memory.restore"))
+
+	// MCP
+	clients, err := Start(ctx, os.Getenv("MCP_SERVERS"))
+	if err != nil {
+		panic(err)
+	}
+	starflow.RegisterFunc(client, clients.ListServers, starflow.WithName("mcp.list_servers"))
 
 	historyFile := filepath.Join(os.TempDir(), "termichat_history.txt")
 	rl, err := readline.NewEx(&readline.Config{

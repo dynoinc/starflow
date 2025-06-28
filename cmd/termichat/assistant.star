@@ -75,6 +75,9 @@ def load_recent_memories(ctx):
 def main(ctx, input):
     system_prompt = "You are a helpful assistant.\n\n"
 
+    for server in mcp.list_servers(ctx, {}):
+        print(server)
+
     # Add memories to the system message
     memories = load_recent_memories(ctx)
     if memories:
