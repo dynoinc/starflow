@@ -15,6 +15,7 @@ import (
 	"github.com/dynoinc/starflow"
 	"github.com/joho/godotenv"
 	"github.com/lmittmann/tint"
+	"github.com/openai/openai-go"
 )
 
 //go:embed assistant.star
@@ -31,6 +32,7 @@ type Response struct {
 func main() {
 	_ = godotenv.Load()
 
+	// Logging
 	logHandler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:      slog.LevelInfo,
 		TimeFormat: time.StampMilli,
@@ -38,6 +40,7 @@ func main() {
 	logger := slog.New(logHandler)
 	slog.SetDefault(logger)
 
+	// Database (for conversations, memories and events)
 	dbPath := filepath.Join(os.TempDir(), "termichat.sqlite")
 	sqlite, err := NewSQLiteDB(dbPath)
 	if err != nil {
@@ -45,7 +48,16 @@ func main() {
 	}
 
 	client := starflow.NewClient[Message, Response](NewSQLiteStore(sqlite))
-	starflow.RegisterFunc(client, OpenAIComplete, starflow.WithName("openai.complete"))
+
+	// OpenAI client
+	openaiClient := openai.NewClient()
+	starflow.RegisterFunc(client, func(ctx context.Context, req openai.ChatCompletionNewParams) (*openai.ChatCompletion, error) {
+		return openaiClient.Chat.Completions.New(ctx, req)
+	}, starflow.WithName("openai.complete"))
+
+	// Memories
+	starflow.RegisterFunc(client, MemoryStore(sqlite), starflow.WithName("memory.store"))
+	starflow.RegisterFunc(client, MemoryLoad(sqlite), starflow.WithName("memory.load"))
 
 	historyFile := filepath.Join(os.TempDir(), "termichat_history.txt")
 	rl, err := readline.NewEx(&readline.Config{
