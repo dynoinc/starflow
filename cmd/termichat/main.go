@@ -32,6 +32,10 @@ type Response struct {
 func main() {
 	_ = godotenv.Load()
 
+	if err := starflow.ValidateScript(assistantScript); err != nil {
+		panic(err)
+	}
+
 	// Logging
 	logHandler := tint.NewHandler(os.Stdout, &tint.Options{
 		Level:      slog.LevelInfo,

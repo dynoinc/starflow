@@ -71,7 +71,7 @@ def main(ctx, input):
     ]
     
     # Tool call loop (up to 5 iterations)
-    for range(5):
+    for _ in range(5):
         # Create completion request and call OpenAI
         completion_params = create_completion_params(messages)
         result = openai.complete(ctx, completion_params)

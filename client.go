@@ -129,9 +129,9 @@ func RegisterFunc[Input any, Output any, Req any, Res any](
 	c.registry[reg.name] = reg
 }
 
-// validateScript performs validation on the Starlark script.
+// ValidateScript performs validation on the Starlark script.
 // It checks for syntax errors and ensures the script has a main function.
-func validateScript(script []byte) error {
+func ValidateScript(script []byte) error {
 	// Parse the script to check for syntax errors
 	parsed, err := (&syntax.FileOptions{}).Parse("script", script, 0)
 	if err != nil {
@@ -151,7 +151,7 @@ func validateScript(script []byte) error {
 
 // Run creates a new workflow run with a script, and input, returning the run ID.
 func (c *Client[Input, Output]) Run(ctx context.Context, runID string, script []byte, input Input) (Output, error) {
-	if err := validateScript(script); err != nil {
+	if err := ValidateScript(script); err != nil {
 		var zero Output
 		return zero, fmt.Errorf("failed to validate script: %w", err)
 	}
