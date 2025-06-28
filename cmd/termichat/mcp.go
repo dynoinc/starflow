@@ -2,9 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -14,21 +14,38 @@ type mcpClients struct {
 	clients map[string]*client.Client
 }
 
-func Start(ctx context.Context, servers string) (*mcpClients, error) {
+func Start(ctx context.Context, cfgPath string) (*mcpClients, error) {
+	var config struct {
+		MCP map[string]struct {
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			URL     string            `json:"url"`
+			Type    string            `json:"type"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+
+	cfgFile, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(cfgFile, &config); err != nil {
+		return nil, err
+	}
+
 	clients := make(map[string]*client.Client)
-
-	for server := range strings.SplitSeq(servers, ",") {
-		mc, err := client.NewStdioMCPClient(server, os.Environ())
+	for name, server := range config.MCP {
+		mc, err := client.NewStdioMCPClient(server.Command, os.Environ(), server.Args...)
 		if err != nil {
 			return nil, err
 		}
 
-		resp, err := mc.Initialize(ctx, mcp.InitializeRequest{})
-		if err != nil {
+		if _, err := mc.Initialize(ctx, mcp.InitializeRequest{}); err != nil {
 			return nil, err
 		}
 
-		clients[resp.ServerInfo.Name] = mc
+		clients[name] = mc
 	}
 
 	return &mcpClients{clients: clients}, nil

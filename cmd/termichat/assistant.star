@@ -108,7 +108,7 @@ def main(ctx, input):
 
         completion_params = {
             "messages": messages,
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1-mini",
             "temperature": 0.5
         }
 

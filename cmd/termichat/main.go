@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,18 +13,20 @@ import (
 	_ "embed"
 
 	"github.com/chzyer/readline"
-	"github.com/dynoinc/starflow"
 	"github.com/joho/godotenv"
 	"github.com/lithammer/shortuuid"
 	"github.com/lmittmann/tint"
 	"github.com/openai/openai-go"
+
+	"github.com/dynoinc/starflow"
 )
 
 //go:embed assistant.star
 var assistantScript []byte
 
 func main() {
-	_ = godotenv.Load()
+	flag.Parse()
+	godotenv.Load()
 	ctx := context.Background()
 	conversationID := shortuuid.New()
 
@@ -63,7 +66,7 @@ func main() {
 	starflow.RegisterFunc(client, MemoryRestore(sqlite), starflow.WithName("memory.restore"))
 
 	// MCP
-	clients, err := Start(ctx, os.Getenv("MCP_SERVERS"))
+	clients, err := Start(ctx, os.Getenv("MCP_CONFIG"))
 	if err != nil {
 		panic(err)
 	}
@@ -85,7 +88,7 @@ func main() {
 	}
 	defer rl.Close()
 
-	fmt.Println("Welcome to TermiChat!. Using sqlite at", dbPath, "and conversation ID is", conversationID)
+	fmt.Printf("Welcome to TermiChat!. (DB: %s, ConversationID: %s)\n", dbPath, conversationID)
 	fmt.Println("Type your message and press Enter. Press Ctrl+C to quit.")
 	for {
 		msg, err := rl.Readline()
