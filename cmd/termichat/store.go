@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -79,16 +80,28 @@ func (s *eventPrintingStore) AppendEvent(ctx context.Context, runID string, expe
 	json.Unmarshal(eventData, &event)
 
 	attrs := []any{}
+	body := ""
 
 	switch meta := event.Metadata.(type) {
 	case starflow.StartEvent:
 		attrs = append(attrs, "scriptHash", meta.ScriptHash())
 	case starflow.CallEvent:
 		attrs = append(attrs, "function", meta.FunctionName())
+		if inputJSON, err := json.MarshalIndent(meta.Input(), "", "  "); err == nil {
+			body = string(inputJSON)
+		} else {
+			attrs = append(attrs, "input", meta.Input())
+		}
 	case starflow.ReturnEvent:
-		_, err := meta.Output()
+		output, err := meta.Output()
 		if err != nil {
 			attrs = append(attrs, "error", err)
+		} else {
+			if outputJSON, marshalErr := json.MarshalIndent(output, "", "  "); marshalErr == nil {
+				body = string(outputJSON)
+			} else {
+				attrs = append(attrs, "output", output)
+			}
 		}
 	case starflow.YieldEvent:
 		attrs = append(attrs, "signalID", meta.SignalID())
@@ -101,12 +114,22 @@ func (s *eventPrintingStore) AppendEvent(ctx context.Context, runID string, expe
 	case starflow.RandIntEvent:
 		attrs = append(attrs, "result", meta.Result())
 	case starflow.FinishEvent:
-		_, err := meta.Output()
+		output, err := meta.Output()
 		if err != nil {
 			attrs = append(attrs, "error", err)
+		} else {
+			if outputJSON, marshalErr := json.MarshalIndent(output, "", "  "); marshalErr == nil {
+				body = string(outputJSON)
+			} else {
+				attrs = append(attrs, "output", output)
+			}
 		}
 	}
 
 	slog.Info(string(event.Type()), attrs...)
+	if body != "" {
+		fmt.Println(body)
+	}
+
 	return s.Store.AppendEvent(ctx, runID, expectedVersion, eventData)
 }

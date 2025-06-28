@@ -14,11 +14,11 @@ type MemoryResponse struct {
 	Success bool `json:"success"`
 }
 
-type LoadMemoryRequest struct {
+type RestoreMemoryRequest struct {
 	Count int `json:"count"`
 }
 
-type LoadMemoryResponse struct {
+type RestoreMemoryResponse struct {
 	Memories []string `json:"memories"`
 }
 
@@ -32,11 +32,11 @@ func MemoryStore(db *sql.DB) func(context.Context, MemoryRequest) (MemoryRespons
 	}
 }
 
-func MemoryLoad(db *sql.DB) func(context.Context, LoadMemoryRequest) (LoadMemoryResponse, error) {
-	return func(ctx context.Context, req LoadMemoryRequest) (LoadMemoryResponse, error) {
+func MemoryRestore(db *sql.DB) func(context.Context, RestoreMemoryRequest) (RestoreMemoryResponse, error) {
+	return func(ctx context.Context, req RestoreMemoryRequest) (RestoreMemoryResponse, error) {
 		rows, err := db.QueryContext(ctx, `SELECT memory FROM user_memories ORDER BY timestamp DESC LIMIT ?`, req.Count)
 		if err != nil {
-			return LoadMemoryResponse{}, err
+			return RestoreMemoryResponse{}, err
 		}
 		defer rows.Close()
 
@@ -44,11 +44,11 @@ func MemoryLoad(db *sql.DB) func(context.Context, LoadMemoryRequest) (LoadMemory
 		for rows.Next() {
 			var memory string
 			if err := rows.Scan(&memory); err != nil {
-				return LoadMemoryResponse{}, err
+				return RestoreMemoryResponse{}, err
 			}
 			memories = append(memories, memory)
 		}
 
-		return LoadMemoryResponse{Memories: memories}, nil
+		return RestoreMemoryResponse{Memories: memories}, nil
 	}
 }

@@ -61,7 +61,7 @@ func main() {
 
 	// Memories
 	starflow.RegisterFunc(client, MemoryStore(sqlite), starflow.WithName("memory.store"))
-	starflow.RegisterFunc(client, MemoryLoad(sqlite), starflow.WithName("memory.load"))
+	starflow.RegisterFunc(client, MemoryRestore(sqlite), starflow.WithName("memory.restore"))
 
 	historyFile := filepath.Join(os.TempDir(), "termichat_history.txt")
 	rl, err := readline.NewEx(&readline.Config{
@@ -75,7 +75,8 @@ func main() {
 	}
 	defer rl.Close()
 
-	fmt.Println("Welcome to TermiChat! Type your message and press Enter. Press Ctrl+C to quit.")
+	fmt.Println("Welcome to TermiChat!. Using sqlite at ", dbPath)
+	fmt.Println("Type your message and press Enter. Press Ctrl+C to quit.")
 	for {
 		msg, err := rl.Readline()
 		if err == readline.ErrInterrupt {

@@ -22,13 +22,15 @@ tools = [
         }
     ]
 
-def create_completion_params(messages):
+def create_completion_params(messages, include_tools=True):
     """Create OpenAI ChatCompletionNewParams"""
-    return {
+    params = {
         "messages": messages,
-        "model": "gpt-4o-mini",
-        "tools": tools
+        "model": "gpt-4o-mini"
     }
+    if include_tools:
+        params["tools"] = tools
+    return params
 
 def extract_message_from_completion(result):
     """Extract message from OpenAI ChatCompletion response"""
@@ -50,49 +52,76 @@ def execute_tool_calls(ctx, tool_calls):
     tool_messages = []
     for tool_call in tool_calls:
         if tool_call["function"]["name"] == "memory_store":
-            # Parse arguments and call memory.store
             args = json_decode(tool_call["function"]["arguments"])
             memory_result = memory.store(ctx, {"memory": args["memory"]})
             
-            # Create tool response message
+            success_msg = "Memory stored successfully"
+            error_msg = "Failed to store memory"
+            content = success_msg if memory_result["success"] else error_msg
+            
             tool_message = {
                 "role": "tool",
                 "tool_call_id": tool_call["id"],
-                "content": "Memory stored successfully" if memory_result["success"] else "Failed to store memory"
+                "content": content
             }
             tool_messages.append(tool_message)
     return tool_messages
 
+def load_recent_memories(ctx):
+    """Load the 5 most recent memories"""
+    memory_result = memory.restore(ctx, {"count": 5})
+    return memory_result.get("memories", [])
+
 def main(ctx, input):
-    # Start conversation with user message
+    system_prompt = "You are a helpful assistant.\n\n"
+
+    # Add memories to the system message
+    memories = load_recent_memories(ctx)
+    if memories:
+        system_prompt += '''
+        Recent memories from our past conversations:
+        {memories_text}
+        Use these memories to provide more contextual and personalized assistance.
+        '''.format(memories_text="\n".join(["- " + mem for mem in memories]))
+
     messages = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": input["message"]}
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": input["message"]}
     ]
-    
-    # Tool call loop (up to 5 iterations)
-    for _ in range(5):
-        # Create completion request and call OpenAI
-        completion_params = create_completion_params(messages)
+
+    max_iterations = 5
+    for iteration in range(max_iterations):
+        is_final_iteration = (iteration == max_iterations - 1)
+
+        if is_final_iteration:
+            messages.append({
+                "role": "system", 
+                "content": '''
+                This is the final iteration of the conversation. 
+                Please provide a comprehensive answer and include suggestions on: 
+                1. What progress has been made so far 
+                2. What specific next steps the user should take 
+                3. Any important considerations or potential challenges 
+                4. How the user can continue or resume this work
+                '''
+            })
+
+        include_tools = not is_final_iteration
+        completion_params = create_completion_params(messages, include_tools)
         result = openai.complete(ctx, completion_params)
         
-        # Extract message from response
         message = extract_message_from_completion(result)
         if not message:
             return {"response": "No response from the model"}
         
-        # Add assistant message to conversation
         assistant_message = create_assistant_message(message)
         messages.append(assistant_message)
         
-        # Handle tool calls if present
-        if message.get("tool_calls"):
-            tool_messages = execute_tool_calls(ctx, message["tool_calls"])
-            messages.extend(tool_messages)
-            continue
-        else:
-            # No tool calls, return the response
-            return {"response": message.get("content", "")}
+        has_tool_calls = message.get("tool_calls")
+        if not has_tool_calls:
+            break
+
+        tool_messages = execute_tool_calls(ctx, message["tool_calls"])
+        messages.extend(tool_messages)
     
-    # If we've exhausted retries, return the last response
-    return {"response": message.get("content", "")} 
+    return {"response": messages[-1].get("content", "")} 
