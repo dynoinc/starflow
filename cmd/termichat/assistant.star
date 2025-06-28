@@ -87,7 +87,7 @@ def main(ctx, input):
 
     # Load conversation history, memories and MCP tools available to the assistant
     history = conversations.history(ctx, {"count": 5})
-    memories = memories.restore(ctx, {"count": 5}).get("memories", [])
+    memories = memory.restore(ctx, {"count": 5}).get("memories", [])
     mcp_tools = mcp.list_tools(ctx, {})
 
     system_prompt = "You are a helpful assistant.\n\n"
@@ -129,7 +129,7 @@ def main(ctx, input):
         
         result = openai.complete(ctx, completion_params)
         if not result.get("choices", []):
-            return {"response": "No response from the model"}
+            return "No response from the model"
         
         assistant_message = result["choices"][0]["message"]
         messages.append(assistant_message)
@@ -141,4 +141,4 @@ def main(ctx, input):
         tool_messages = execute_tool_calls(ctx, assistant_message["tool_calls"])
         messages.extend(tool_messages)
     
-    return {"response": messages[-1].get("content", "No content in the model response")} 
+    return messages[-1].get("content", "No content in the model response")

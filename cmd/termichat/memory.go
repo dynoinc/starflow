@@ -22,7 +22,7 @@ type RestoreMemoryResponse struct {
 	Memories []string `json:"memories"`
 }
 
-func MemoriesStore(db *sql.DB) func(context.Context, StoreMemoryRequest) (StoreMemoryResponse, error) {
+func MemoryStore(db *sql.DB) func(context.Context, StoreMemoryRequest) (StoreMemoryResponse, error) {
 	return func(ctx context.Context, req StoreMemoryRequest) (StoreMemoryResponse, error) {
 		_, err := db.ExecContext(ctx, `INSERT INTO user_memories(timestamp, memory) VALUES (?, ?)`, time.Now(), req.Memory)
 		if err != nil {
@@ -32,7 +32,7 @@ func MemoriesStore(db *sql.DB) func(context.Context, StoreMemoryRequest) (StoreM
 	}
 }
 
-func MemoriesRestore(db *sql.DB) func(context.Context, RestoreMemoryRequest) (RestoreMemoryResponse, error) {
+func MemoryRestore(db *sql.DB) func(context.Context, RestoreMemoryRequest) (RestoreMemoryResponse, error) {
 	return func(ctx context.Context, req RestoreMemoryRequest) (RestoreMemoryResponse, error) {
 		rows, err := db.QueryContext(ctx, `SELECT memory FROM user_memories ORDER BY timestamp DESC LIMIT ?`, req.Count)
 		if err != nil {
