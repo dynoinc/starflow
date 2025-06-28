@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -29,47 +28,6 @@ type Response struct {
 	Response string `json:"response"`
 }
 
-type eventPrintingStore struct {
-	starflow.Store
-}
-
-func (s *eventPrintingStore) AppendEvent(ctx context.Context, runID string, expectedVersion int, eventData []byte) (int, error) {
-	var event starflow.Event
-	json.Unmarshal(eventData, &event)
-
-	attrs := []any{}
-
-	switch meta := event.Metadata.(type) {
-	case starflow.StartEvent:
-		attrs = append(attrs, "scriptHash", meta.ScriptHash())
-	case starflow.CallEvent:
-		attrs = append(attrs, "function", meta.FunctionName())
-	case starflow.ReturnEvent:
-		_, err := meta.Output()
-		if err != nil {
-			attrs = append(attrs, "error", err)
-		}
-	case starflow.YieldEvent:
-		attrs = append(attrs, "signalID", meta.SignalID())
-	case starflow.ResumeEvent:
-		attrs = append(attrs, "signalID", meta.SignalID())
-	case starflow.SleepEvent:
-		attrs = append(attrs, "until", meta.WakeupAt().Format(time.RFC3339))
-	case starflow.TimeNowEvent:
-		attrs = append(attrs, "timestamp", meta.Timestamp().Format(time.RFC3339))
-	case starflow.RandIntEvent:
-		attrs = append(attrs, "result", meta.Result())
-	case starflow.FinishEvent:
-		_, err := meta.Output()
-		if err != nil {
-			attrs = append(attrs, "error", err)
-		}
-	}
-
-	slog.Info(string(event.Type()), attrs...)
-	return s.Store.AppendEvent(ctx, runID, expectedVersion, eventData)
-}
-
 func main() {
 	_ = godotenv.Load()
 
@@ -81,12 +39,12 @@ func main() {
 	slog.SetDefault(logger)
 
 	dbPath := filepath.Join(os.TempDir(), "termichat.sqlite")
-	store, err := NewSQLiteStore(dbPath)
+	sqlite, err := NewSQLiteDB(dbPath)
 	if err != nil {
 		panic(err)
 	}
-	wrappedStore := &eventPrintingStore{store}
-	client := starflow.NewClient[Message, Response](wrappedStore)
+
+	client := starflow.NewClient[Message, Response](NewSQLiteStore(sqlite))
 	starflow.RegisterFunc(client, OpenAIComplete, starflow.WithName("openai.complete"))
 
 	historyFile := filepath.Join(os.TempDir(), "termichat_history.txt")
