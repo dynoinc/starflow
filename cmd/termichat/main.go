@@ -1,17 +1,21 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
 
 	_ "embed"
 
+	"github.com/chzyer/readline"
 	"github.com/dynoinc/starflow"
+	"github.com/joho/godotenv"
+	"github.com/lmittmann/tint"
 )
 
 //go:embed assistant.star
@@ -33,39 +37,49 @@ func (s *eventPrintingStore) AppendEvent(ctx context.Context, runID string, expe
 	var event starflow.Event
 	json.Unmarshal(eventData, &event)
 
-	summary := ""
+	attrs := []any{}
+
 	switch meta := event.Metadata.(type) {
 	case starflow.StartEvent:
-		summary = fmt.Sprintf("scriptHash=%s", meta.ScriptHash())
+		attrs = append(attrs, "scriptHash", meta.ScriptHash())
 	case starflow.CallEvent:
-		summary = fmt.Sprintf("function=%s", meta.FunctionName())
+		attrs = append(attrs, "function", meta.FunctionName())
 	case starflow.ReturnEvent:
 		_, err := meta.Output()
 		if err != nil {
-			summary = fmt.Sprintf("error=%v", err)
+			attrs = append(attrs, "error", err)
 		}
 	case starflow.YieldEvent:
-		summary = fmt.Sprintf("signalID=%s", meta.SignalID())
+		attrs = append(attrs, "signalID", meta.SignalID())
 	case starflow.ResumeEvent:
-		summary = fmt.Sprintf("signalID=%s", meta.SignalID())
+		attrs = append(attrs, "signalID", meta.SignalID())
 	case starflow.SleepEvent:
-		summary = fmt.Sprintf("until=%s", meta.WakeupAt().Format(time.RFC3339))
+		attrs = append(attrs, "until", meta.WakeupAt().Format(time.RFC3339))
 	case starflow.TimeNowEvent:
-		summary = fmt.Sprintf("timestamp=%s", meta.Timestamp().Format(time.RFC3339))
+		attrs = append(attrs, "timestamp", meta.Timestamp().Format(time.RFC3339))
 	case starflow.RandIntEvent:
-		summary = fmt.Sprintf("result=%d", meta.Result())
+		attrs = append(attrs, "result", meta.Result())
 	case starflow.FinishEvent:
 		_, err := meta.Output()
 		if err != nil {
-			summary = fmt.Sprintf("error=%v", err)
+			attrs = append(attrs, "error", err)
 		}
 	}
 
-	fmt.Printf("%s %-8s %s\n", event.Timestamp.Format("15:04:05.000"), event.Type(), summary)
+	slog.Info(string(event.Type()), attrs...)
 	return s.Store.AppendEvent(ctx, runID, expectedVersion, eventData)
 }
 
 func main() {
+	_ = godotenv.Load()
+
+	logHandler := tint.NewHandler(os.Stdout, &tint.Options{
+		Level:      slog.LevelInfo,
+		TimeFormat: time.StampMilli,
+	})
+	logger := slog.New(logHandler)
+	slog.SetDefault(logger)
+
 	dbPath := filepath.Join(os.TempDir(), "termichat.sqlite")
 	store, err := NewSQLiteStore(dbPath)
 	if err != nil {
@@ -73,16 +87,35 @@ func main() {
 	}
 	wrappedStore := &eventPrintingStore{store}
 	client := starflow.NewClient[Message, Response](wrappedStore)
+	starflow.RegisterFunc(client, OpenAIComplete, starflow.WithName("openai.complete"))
 
-	r := bufio.NewReader(os.Stdin)
-	fmt.Println("Welcome to TermiChat! Type your message and press Enter. Type 'exit' or leave blank to quit.")
+	historyFile := filepath.Join(os.TempDir(), "termichat_history.txt")
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "👤 ",
+		HistoryFile:     historyFile,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "Goodbye!\n",
+	})
+	if err != nil {
+		panic(err)
+	}
+	defer rl.Close()
+
+	fmt.Println("Welcome to TermiChat! Type your message and press Enter. Press Ctrl+C to quit.")
 	for {
-		fmt.Print("👤 ")
-		msg, _ := r.ReadString('\n')
-		msg = msg[:len(msg)-1]
-		if msg == "" || msg == "exit" {
-			fmt.Println("Goodbye!")
+		msg, err := rl.Readline()
+		if err == readline.ErrInterrupt {
+			if len(msg) == 0 {
+				fmt.Println("Goodbye!")
+				break
+			}
+			continue
+		} else if err == io.EOF {
 			break
+		}
+
+		if msg == "" {
+			continue
 		}
 
 		input := Message{Message: msg}
